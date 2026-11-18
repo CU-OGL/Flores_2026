@@ -26,7 +26,7 @@ library(gridExtra)
 
 # codigo de paper IPLs Flores 2022 et al., 
 
-```{r setup, include=FALSE}
+```{r, include=FALSE}
 library(ggplot2)
 ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/20.sat_unsat_table.csv")
 #ratio1 <- read.csv("~/Documents/EF_IPL_Processing_new/data_final/21.sat_unsat_table.csv")
@@ -36,7 +36,7 @@ data <- data.frame(ratio)
 ```
 
 
-```{r pressure, echo=FALSE}
+```{r, echo=FALSE}
 ggplot(data = ratio, aes(x=factor(environment), y=unsat.sat, fill=environment)) + 
    geom_boxplot(position=position_dodge(0.9), outlier.colour = NA)  + 
   geom_smooth(method="gam", span=0.20, se=TRUE, aes(group=unsat.sat, color=unsat.sat)) +
@@ -46,7 +46,7 @@ ggplot(data = ratio, aes(x=factor(environment), y=unsat.sat, fill=environment)) 
   xlab("Environment") 
 ```
 
-```{r pressure, echo=FALSE}
+```{r, echo=FALSE}
 p <- ggplot(ratio,aes(x=environment,y=unsat.sat, fill=environment)) +
   geom_boxplot(aes(group=environment)) + 
   geom_point(aes(fill=environment),size=2,shape=21,position=position_jitterdodge(0.6)) +
@@ -77,7 +77,7 @@ data <- data.frame(ratio)
 
 # SURFACE
 
-```{r pressure, echo=FALSE}
+```{r, echo=FALSE}
 p <- ggplot(ratio,aes(x=phase,y=unsat.sat, fill=phase)) +
   geom_boxplot(aes(group=phase)) + 
   geom_point(aes(fill=phase),size=2,shape=21,position=position_jitterdodge(0.6)) +
@@ -157,7 +157,7 @@ p
 
 # BOTTOM 
 
-```{r }
+```{r}
 library(ggplot2)
 
 # ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/05.surface_class_sampletype_bound_sat_unsat_ratio.csv")
