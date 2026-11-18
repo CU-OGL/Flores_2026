@@ -67,19 +67,19 @@ library(ggsci)
 library(patchwork)
 ``` 
 
-```{r cars}
+```{r}
 #e_data <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/environment_data.csv")
 e_data <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/full_nutrients_final.csv")
 ```
 
 #remover Pacific
-```{r cars}
+```{r}
 e_data <- subset(e_data, ID != "Pacific")
 e_data <- subset(e_data, select = -N_star)
 e_data <- na.omit(e_data)
 ```
 
-```{r cars}
+```{r}
 # Crear una nueva columna "typeset3" basada en la columna "ID"
 e_data$typeset3 <- sub(".*Mesocosm (\\d+)_.*", "Mesocosm \\1", e_data$ID)
 
@@ -87,7 +87,7 @@ e_data$typeset3 <- sub(".*Mesocosm (\\d+)_.*", "Mesocosm \\1", e_data$ID)
 head(e_data)
 ```
 
-```{r pressure, echo=FALSE}
+```{r, echo=FALSE}
 # Crear una nueva columna "typeset2" basada en la columna "ID"
 e_data$typeset2 <- ifelse(grepl("^Surface", e_data$ID), "Surface", 
                           ifelse(grepl("^Bottom", e_data$ID), "Subsurface", NA))
