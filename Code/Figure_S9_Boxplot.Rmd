@@ -175,7 +175,7 @@ a
 ```
 
 
-```{r cars}
+```{r}
 figure_boxplots <- ggarrange (p,a, 
                      labels = c("A","B"),
                      ncol = 1, nrow = 2)
@@ -441,7 +441,7 @@ a1
 ```
 
 
-```{r cars}
+```{r}
 figure_boxplots <- ggarrange (p,a,p1,a1, 
                      labels = c("A","B","C","D"),
                      ncol = 2, nrow = 2)
