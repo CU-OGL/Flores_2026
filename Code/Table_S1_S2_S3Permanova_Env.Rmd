@@ -1,0 +1,153 @@
+---
+title: "PERMANOVA_ENV"
+output: html_document
+date: "2026-08-22"
+---
+
+---
+title: "Enviromental_data"
+author: "Edgart Flores"
+date: "10/24/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(tidyverse) # conjunto de librerias
+library(readr)
+library(readxl)
+library(openxlsx)
+library(dplyr)
+library(RColorBrewer)
+library(tidyr)
+library(ggthemes)
+#library(ggarrange)
+```
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(gridExtra)
+library(readr)
+library(tidyverse)
+library(latex2exp)
+library(readxl)
+library(here) 
+library(broom)
+library(ggplot2)
+library(RColorBrewer)
+library(scales)
+library(reshape2)
+library(dendextend)
+library(cowplot)
+library(ggdendro)
+library(graphics)
+library(vegan)
+library(pvclust)
+library(cluster)
+library(factoextra)
+library(magrittr)
+library(janitor)
+library(ade4) 
+#library(adespatial) 
+library(gclus) 
+library(cluster) 
+library(FD)
+library(ggpubr)
+require(reshape2)
+library(dplyr) 
+library(devtools)
+library(ggpmisc)
+library(multcompView)
+library(ggsci)
+
+library(patchwork)
+``` 
+
+```{r cars}
+#e_data <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/environment_data.csv")
+e_data <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/full_nutrients_final.csv")
+```
+
+#remover Pacific
+```{r cars}
+e_data <- subset(e_data, ID != "Pacific")
+e_data <- subset(e_data, select = -N_star)
+e_data <- na.omit(e_data)
+```
+
+```{r cars}
+# Crear una nueva columna "typeset3" basada en la columna "ID"
+e_data$typeset3 <- sub(".*Mesocosm (\\d+)_.*", "Mesocosm \\1", e_data$ID)
+
+# Verificar la estructura actual de e_data
+head(e_data)
+```
+
+```{r pressure, echo=FALSE}
+# Crear una nueva columna "typeset2" basada en la columna "ID"
+e_data$typeset2 <- ifelse(grepl("^Surface", e_data$ID), "Surface", 
+                          ifelse(grepl("^Bottom", e_data$ID), "Subsurface", NA))
+
+# Imprimir el dataframe para verificar los cambios
+print(e_data)
+```
+
+```{r}
+e_data <- e_data[, c("Day", "typeset2", "typeset3", names(e_data)[!names(e_data) %in% c("Day", "typeset2", "typeset3")])]
+```
+
+# Harry agree 31.999 look this
+```{r}
+e_data$O2 <- e_data$O2 * 31.24986 # transformar de ml.L a umol/Kg o simplemente uM.
+```
+
+```{r}
+library(vegan)
+
+# Variables ambientales a incluir (ajusta según lo que quieras testear)
+env_vars <- c("Chla", "Light", "NH4", "NO2", "NO3", "O2", "pH", 
+              "PO4", "SiO2", "Temp", "Salinity", "NP")
+
+# Estandarizar (z-score) porque las escalas son muy distintas
+e_data_scaled <- scale(e_data[, env_vars])
+
+# Matriz de distancia euclidiana (estándar para datos ambientales estandarizados)
+dist_env <- vegdist(e_data_scaled, method = "euclidean")
+
+# --- PERMANOVA: diferencias por typeset2 (Surface/Subsurface) ---
+permanova_typeset2 <- adonis2(dist_env ~ typeset2, 
+                               data = e_data, 
+                               permutations = 999)
+print(permanova_typeset2)
+
+# --- PERMANOVA: diferencias por typeset3 (Mesocosm 5,6,7,8) ---
+permanova_typeset3 <- adonis2(dist_env ~ typeset3, 
+                               data = e_data, 
+                               permutations = 999)
+print(permanova_typeset3)
+
+# --- Modelo combinado (ambos factores + interacción) ---
+permanova_full <- adonis2(dist_env ~ typeset2 * typeset3, 
+                           data = e_data, 
+                           permutations = 999)
+print(permanova_full)
+```
+
+```{r}
+disp_typeset2 <- betadisper(dist_env, e_data$typeset2)
+anova(disp_typeset2)
+permutest(disp_typeset2)
+```
+
+
+```{r}
+simper_result <- simper(e_data_scaled, e_data$typeset2)
+summary(simper_result)
+```
+
+
+

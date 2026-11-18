@@ -1,0 +1,2479 @@
+---
+title: "Diversity 3.0"
+author: "Edgart Flores"
+date: "2025-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+```{r}
+library(vegan)
+library(tidyr)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+```
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+#      Nuevo proyecto, aqui quiero mostrar los análisis de riqueza y diversidad por dias  
+#--------------------------------------------------------------------------------------------------------------------------------------------
+
+```{r, message=FALSE}
+library(tidyverse)
+library(vegan)
+
+# Cargar los datos
+class <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv", 
+                    sep = ",", header = TRUE)
+
+# Filtrar muestras Surface y Bottom
+class_surface <- class %>% filter(grepl("^Surface", X))
+class_bottom  <- class %>% filter(grepl("^Bottom", X))
+```
+
+
+#--------------------------------------------
+#        EMPECEMOS CON SURFACE
+#--------------------------------------------
+
+# habia algo mal en el ressultado anterior pienso que estaba tomando solo un valor de cada dia y no un promedio de los dias repetidos, vamos a corregirlo
+
+```{r}
+# Cargar paquetes
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Filtrar Surface y extraer día real de la columna X
+class_surface <- class %>%
+  filter(grepl("^Surface", X)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", X)))
+
+# Calcular índices por muestra
+calc_indices <- function(x) {
+  x <- round(x)
+  est <- estimateR(x)
+  return(data.frame(Chao1 = est["S.chao1"], ACE = est["S.ACE"]))
+}
+
+indices_df <- class_surface %>%
+  select(X, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(temp = list(calc_indices(c_across(where(is.numeric))))) %>%
+  unnest(temp)
+
+# Calcular media y error estándar por día real y métrica
+summary_df <- indices_df %>%
+  pivot_longer(cols = c("Chao1", "ACE"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+# Colores más suaves del espectro RdBu
+palette_colors <- brewer.pal(11, "RdBu")[c(2, 10)]  # azul medio y rojo medio # [c(3, 9)] alternative
+
+# Etiquetas personalizadas
+ticks <- c(10, 12, 14, 16, 18, 20, 24, 38, 50)
+labels <- paste0("Day-", ticks)
+
+# Graficar
+ggplot(summary_df, aes(x = Day, y = Mean, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 1.2) +
+  theme_minimal() +
+  labs(x = "Day", y = "Chao1 and ACE indices", color = "Metric") +
+  scale_color_manual(values = setNames(palette_colors, c("ACE", "Chao1"))) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotar etiquetas del eje X
+  )
+```
+# FINAL
+
+
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+#           AHORA QUISIERA VER ESTO PARA LOS DATOS DE 16S
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+```{r, message=FALSE}
+bac_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv", sep=",", header = T) 
+```
+
+```{r}
+# Filtrar Surface
+bac_surface <- bac_data %>%
+  filter(grepl("^Surface", ID)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID)))
+```
+
+
+```{r}
+# Función para calcular los índices
+calc_indices <- function(x) {
+  x <- round(x)
+  est <- estimateR(x)
+  return(data.frame(Chao1 = est["S.chao1"], ACE = est["S.ACE"]))
+}
+
+# Calcular por muestra
+indices_bac_surface <- bac_surface %>%
+  select(ID, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(temp = list(calc_indices(c_across(where(is.numeric))))) %>%
+  unnest(temp)
+```
+
+```{r}
+summary_bac_surface <- indices_bac_surface %>%
+  pivot_longer(cols = c("Chao1", "ACE"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+library(RColorBrewer)
+
+# Etiquetas del eje X
+ticks <- c(2, 10, 12, 14, 16, 18, 20, 24, 38, 50)
+labels <- paste0("Day-", ticks)
+
+# Colores RdBu intermedios
+palette_colors <- brewer.pal(11, "RdBu")[c(2, 10)]
+
+ggplot(summary_bac_surface, aes(x = Day, y = Mean, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 1.2) +
+  theme_minimal() +
+  labs(x = "Day", y = "Chao1 and ACE indices", color = "Metric") +
+  scale_color_manual(values = setNames(palette_colors, c("ACE", "Chao1"))) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+```{r}
+# Separar los datos para el gráfico de doble eje Y
+data_lipidos <- combined_data %>% filter(Tipo == "Lipidos")
+data_16s <- combined_data %>% filter(Tipo == "16S")
+
+# Para el gráfico con doble eje Y necesitamos calcular un factor de escala
+max_lipidos <- max(data_lipidos$Mean)
+max_16s <- max(data_16s$Mean)
+scale_factor <- max_lipidos / max_16s
+
+# Colores personalizados para diferentes combinaciones
+my_colors <- c(
+  "Lipidos-ACE" = "#9E3C3C",          # rojo oscuro para IPL-ACE
+  "Lipidos-Chao1" = "#F08080",        # rojo claro para IPL-Chao1
+  "16S-ACE" = "#084594",              # azul oscuro para 16S-ACE
+  "16S-Chao1" = "#3182BD"             # azul claro para 16S-Chao1
+)
+
+# Crear el gráfico combinado con doble eje Y
+p1 <- ggplot() +
+  # Datos de IPL (eje Y izquierdo)
+  geom_point(data = data_lipidos, aes(x = Day, y = Mean, color = Combo, shape = Metric), size = 3) +
+  geom_line(data = data_lipidos, aes(x = Day, y = Mean, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = data_lipidos, aes(x = Day, ymin = Mean - SE, ymax = Mean + SE, color = Combo), width = 1.2) +
+  
+  # Datos de 16S (escalados para el eje Y izquierdo)
+  geom_point(data = data_16s, aes(x = Day, y = Mean * scale_factor, color = Combo, shape = Metric), size = 3) +
+  geom_line(data = data_16s, aes(x = Day, y = Mean * scale_factor, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = data_16s, aes(x = Day, ymin = (Mean - SE) * scale_factor, 
+                                     ymax = (Mean + SE) * scale_factor, color = Combo), width = 1.2) +
+  
+  # Eje Y secundario para los datos 16S
+  scale_y_continuous(
+    name = "IPL - Richness (Chao1 & ACE)",
+    sec.axis = sec_axis(~./scale_factor, name = "16S rRNA - Richness (Chao1 & ACE)")
+  ) +
+  
+  # Estilo
+  scale_color_manual(
+    values = my_colors,
+    labels = c(
+      "Lipidos-ACE" = "IPL - ACE",
+      "Lipidos-Chao1" = "IPL - Chao1",
+      "16S-ACE" = "16S rRNA - ACE",
+      "16S-Chao1" = "16S rRNA - Chao1"
+    )
+  ) +
+  scale_shape_manual(values = c("ACE" = 16, "Chao1" = 17)) +
+  
+  theme_minimal() +
+  labs(x = "Day") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.title.y.left = element_text(color = "#9E3C3C", size = 12, face = "bold"),
+    axis.title.y.right = element_text(color = "#084594", size = 12, face = "bold"),
+    axis.text.y.left = element_text(color = "#9E3C3C"),
+    axis.text.y.right = element_text(color = "#084594")
+  ) +
+  guides(shape = "none")  # remover la guía de forma
+
+p1
+```
+
+
+
+
+```{r}
+#--------------------------------------------
+#        AHORA PARA BOTTOM (Subsurface)
+#--------------------------------------------
+
+# Filtrar Bottom y extraer día real de la columna X
+class_bottom <- class %>%
+  filter(grepl("^Bottom", X)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", X)))
+
+# Calcular índices por muestra
+indices_df_bottom <- class_bottom %>%
+  select(X, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(temp = list(calc_indices(c_across(where(is.numeric))))) %>%
+  unnest(temp)
+
+# Calcular media y error estándar por día real y métrica
+summary_df_bottom <- indices_df_bottom %>%
+  pivot_longer(cols = c("Chao1", "ACE"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Etiquetas personalizadas
+ticks <- c(10, 12, 14, 16, 18, 20, 24, 38, 50)
+labels <- paste0("Day-", ticks)
+
+# Graficar
+ggplot(summary_df_bottom, aes(x = Day, y = Mean, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 1.2) +
+  theme_minimal() +
+  labs(x = "Day", y = "Chao1 and ACE indices", color = "Metric") +
+  scale_color_manual(values = setNames(palette_colors, c("ACE", "Chao1"))) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+
+
+
+# ahora Bottom
+
+```{r}
+# Filtrar Subsurface (Bottom)
+bac_bottom <- bac_data %>%
+  filter(grepl("^Bottom", ID)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID)))
+```
+
+```{r}
+# Calcular Chao1 y ACE por muestra
+indices_bac_bottom <- bac_bottom %>%
+  select(ID, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(temp = list(calc_indices(c_across(where(is.numeric))))) %>%
+  unnest(temp)
+```
+
+```{r}
+# Promedios y errores estándar
+summary_bac_bottom <- indices_bac_bottom %>%
+  pivot_longer(cols = c("Chao1", "ACE"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Etiquetas del eje X
+ticks <- c(2, 10, 12, 14, 16, 18, 20, 24, 38, 50)
+labels <- paste0("Day-", ticks)
+
+# Colores consistentes
+palette_colors <- brewer.pal(11, "RdBu")[c(2, 10)]
+
+# Graficar
+ggplot(summary_bac_bottom, aes(x = Day, y = Mean, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 1.2) +
+  theme_minimal() +
+  labs(x = "Day", y = "Chao1 and ACE indices", color = "Metric") +
+  scale_color_manual(values = setNames(palette_colors, c("ACE", "Chao1"))) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+```{r}
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+#           COMBINAMOS BOTTOM LIPIDOS Y 16S - CON DOBLE EJE Y
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+# Agregar columna de tipo de dato
+summary_lipidos_bottom <- summary_df_bottom %>% 
+  mutate(Tipo = "Lipidos")
+
+summary_16s_bottom <- summary_bac_bottom %>% 
+  mutate(Tipo = "16S")
+
+# Combinar ambos datasets
+combined_data_bottom <- bind_rows(summary_lipidos_bottom, summary_16s_bottom)
+
+# Crear la combinación de tipo de dato y métrica
+combined_data_bottom <- combined_data_bottom %>%
+  mutate(Combo = paste(Tipo, Metric, sep = "-"))
+
+# Separar los datos para el gráfico de doble eje Y
+data_lipidos_bottom <- combined_data_bottom %>% filter(Tipo == "Lipidos")
+data_16s_bottom <- combined_data_bottom %>% filter(Tipo == "16S")
+
+# Calcular el factor de escala para Bottom
+max_lipidos_bottom <- max(data_lipidos_bottom$Mean)
+max_16s_bottom <- max(data_16s_bottom$Mean)
+scale_factor_bottom <- max_lipidos_bottom / max_16s_bottom
+
+# Colores personalizados (iguales que Surface)
+my_colors <- c(
+  "Lipidos-ACE" = "#CB181D",    # rojo fuerte para IPL-ACE
+  "Lipidos-Chao1" = "#FB6A4A",  # rojo claro para IPL-Chao1
+  "16S-ACE" = "#08519C",        # azul fuerte para 16S-ACE
+  "16S-Chao1" = "#6BAED6"       # azul claro para 16S-Chao1
+)
+
+# Crear el gráfico combinado con doble eje Y para Bottom
+p_bottom <- ggplot() +
+  # Datos de IPL (eje Y izquierdo)
+  geom_point(data = data_lipidos_bottom, aes(x = Day, y = Mean, color = Combo, shape = Metric), size = 3) +
+  geom_line(data = data_lipidos_bottom, aes(x = Day, y = Mean, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = data_lipidos_bottom, aes(x = Day, ymin = Mean - SE, ymax = Mean + SE, color = Combo), width = 1.2) +
+  
+  # Datos de 16S (escalados para el eje Y izquierdo)
+  geom_point(data = data_16s_bottom, aes(x = Day, y = Mean * scale_factor_bottom, color = Combo, shape = Metric), size = 3) +
+  geom_line(data = data_16s_bottom, aes(x = Day, y = Mean * scale_factor_bottom, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = data_16s_bottom, aes(x = Day, ymin = (Mean - SE) * scale_factor_bottom, 
+                                            ymax = (Mean + SE) * scale_factor_bottom, color = Combo), width = 1.2) +
+  
+  # Eje Y secundario para los datos 16S
+  scale_y_continuous(
+    name = "IPL - Richness (Chao1 & ACE)",
+    sec.axis = sec_axis(~./scale_factor_bottom, name = "16S rRNA - Richness (Chao1 & ACE)")
+  ) +
+  
+  # Estilo
+  scale_color_manual(
+    values = my_colors,
+    labels = c(
+      "Lipidos-ACE" = "IPL - ACE",
+      "Lipidos-Chao1" = "IPL - Chao1",
+      "16S-ACE" = "16S rRNA - ACE",
+      "16S-Chao1" = "16S rRNA - Chao1"
+    )
+  ) +
+  scale_shape_manual(values = c("ACE" = 16, "Chao1" = 17)) +
+  
+  theme_minimal() +
+  labs(x = "Day", title = "Bottom - Richness Indices Comparison") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.title.y.left = element_text(color = "#9E3C3C", size = 12, face = "bold"),
+    axis.title.y.right = element_text(color = "#084594", size = 12, face = "bold"),
+    axis.text.y.left = element_text(color = "#9E3C3C"),
+    axis.text.y.right = element_text(color = "#084594")
+  ) +
+  guides(shape = "none")  # remover la guía de forma
+
+p_bottom
+
+# Si quieres comparar Surface y Bottom lado a lado, puedes hacer:
+library(gridExtra)
+grid.arrange(p1, p_bottom, ncol = 1)
+
+# O puedes hacer una comparación vertical
+#grid.arrange(p1, p_bottom, ncol = 1)
+```
+
+# Ahora Hagamos esto para Simpson
+
+# Ahora analisis de diversidad con Simpson y Shannon
+# Primero Surface
+#Lipidos
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Asegurarse de tener columna 'Day'
+class_surface <- class_surface %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", X)))
+
+# Calcular Shannon y Simpson por muestra
+diversity_df <- class_surface %>%
+  select(X, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(
+    Shannon = diversity(c_across(where(is.numeric)), index = "shannon"),
+    Simpson = diversity(c_across(where(is.numeric)), index = "simpson")
+  ) %>%
+  ungroup()
+
+# Pasar a formato largo y calcular media y error estándar por día y métrica
+summary_diversity <- diversity_df %>%
+  pivot_longer(cols = c("Shannon", "Simpson"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Crear una columna escalada solo para graficar
+summary_diversity_scaled <- summary_diversity %>%
+  mutate(
+    DisplayValue = ifelse(Metric == "Simpson", Mean * 4, Mean),
+    SE_scaled = ifelse(Metric == "Simpson", SE * 4, SE)
+  )
+```
+
+```{r}
+# Elegir colores adecuados (más sobrios y contrastantes)
+div_colors <- c("Shannon" = "#1f77b4", "Simpson" = "#d62728")  # Azul y rojo sobrio
+
+ggplot(summary_diversity_scaled, aes(x = Day, y = DisplayValue, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = DisplayValue - SE_scaled, ymax = DisplayValue + SE_scaled), width = 1.2) +
+  scale_color_manual(values = div_colors) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~ . / 4, name = "Simpson Index")  # Mostrar escala original de Simpson
+  ) +
+  theme_minimal() +
+  labs(x = "Day", color = "Metric") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black")
+  )
+```
+
+# Bacterias: Ahora analisemos Shannon and Simpson
+
+```{r}
+bac_surface <- bac_data %>%
+  filter(grepl("^Surface", ID)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID)))
+```
+
+```{r}
+diversity_surface <- bac_surface %>%
+  select(ID, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(
+    Shannon = diversity(c_across(where(is.numeric)), index = "shannon"),
+    Simpson = diversity(c_across(where(is.numeric)), index = "simpson")
+  ) %>%
+  ungroup()
+```
+
+
+```{r}
+summary_div_surface <- diversity_surface %>%
+  pivot_longer(cols = c("Shannon", "Simpson"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+summary_div_surface_scaled <- summary_div_surface %>%
+  mutate(
+    DisplayValue = ifelse(Metric == "Simpson", Mean * 4, Mean),
+    SE_scaled = ifelse(Metric == "Simpson", SE * 4, SE)
+  )
+```
+
+
+```{r}
+# Etiquetas del eje X actualizadas
+ticks <- c(2, 10, 12, 14, 16, 18, 20, 24, 38, 40, 44)
+labels <- paste0("Day-", ticks)
+
+# Colores sobrios
+div_colors <- c("Shannon" = "#1f77b4", "Simpson" = "#d62728")
+
+# Plot
+ggplot(summary_div_surface_scaled, aes(x = Day, y = DisplayValue, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = DisplayValue - SE_scaled, ymax = DisplayValue + SE_scaled), width = 1.2) +
+  scale_color_manual(values = div_colors) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~ . / 4, name = "Simpson Index")
+  ) +
+  theme_minimal() +
+  labs(x = "Day", color = "Metric") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+```{r}
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+#           COMBINAMOS SURFACE LIPIDOS Y 16S PARA INDICES DE DIVERSIDAD
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+# Agregar columna de tipo de dato para ambos datasets
+summary_div_lipidos <- summary_diversity %>% 
+  mutate(Tipo = "Lipidos")
+
+summary_div_16s <- summary_div_surface %>% 
+  mutate(Tipo = "16S")
+
+# Combinar ambos datasets
+combined_diversity <- bind_rows(summary_div_lipidos, summary_div_16s)
+
+# Crear la combinación de tipo de dato y métrica
+combined_diversity <- combined_diversity %>%
+  mutate(Combo = paste(Tipo, Metric, sep = "-"))
+
+# Colores personalizados para las diferentes combinaciones
+# Lípidos: tonos rojos, 16S: tonos azules
+my_div_colors <- c(
+  "Lipidos-Shannon" = "#8C510A",   # marrón oscuro para IPL-Shannon
+  "Lipidos-Simpson" = "#D8B365",   # marrón claro para IPL-Simpson
+  "16S-Shannon" = "#01665E",       # verde esmeralda oscuro para 16S-Shannon
+  "16S-Simpson" = "#5AB4AC"        # verde agua para 16S-Simpson
+)
+
+# Para crear el gráfico con doble eje Y necesitamos escalar
+# Primero, separamos los datos
+
+# Para Shannon indices
+shannon_data <- combined_diversity %>% 
+  filter(Metric == "Shannon")
+
+# Para Simpson indices
+simpson_data <- combined_diversity %>% 
+  filter(Metric == "Simpson")
+
+# Calcular factores de escala para Simpson
+# Queremos que Shannon esté en el eje principal, Simpson en el secundario
+scale_factor_simpson <- max(shannon_data$Mean) / max(simpson_data$Mean)
+
+# Graficar
+p_diversity_surface <- ggplot() +
+  # Shannon indices (todos los datos)
+  geom_point(data = shannon_data, aes(x = Day, y = Mean, color = Combo), size = 3) +
+  geom_line(data = shannon_data, aes(x = Day, y = Mean, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = shannon_data, aes(x = Day, ymin = Mean - SE, ymax = Mean + SE, color = Combo), width = 1.2) +
+  
+  # Simpson indices (escalados para mostrarse en el gráfico)
+  geom_point(data = simpson_data, aes(x = Day, y = Mean * scale_factor_simpson, color = Combo), size = 3) +
+  geom_line(data = simpson_data, aes(x = Day, y = Mean * scale_factor_simpson, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = simpson_data, aes(x = Day, ymin = (Mean - SE) * scale_factor_simpson, 
+                                         ymax = (Mean + SE) * scale_factor_simpson, color = Combo), width = 1.2) +
+  
+  # Ejes Y dobles
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~./scale_factor_simpson, name = "Simpson Index")
+  ) +
+  
+  # Colores y estilo
+  scale_color_manual(
+    values = my_div_colors,
+    labels = c(
+      "Lipidos-Shannon" = "IPL - Shannon",
+      "Lipidos-Simpson" = "IPL - Simpson",
+      "16S-Shannon" = "16S rRNA - Shannon",
+      "16S-Simpson" = "16S rRNA - Simpson"
+    )
+  ) +
+  
+  theme_minimal() +
+  labs(x = "Day", title = "Surface - Diversity Indices Comparison") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.title.y.left = element_text(size = 12, face = "bold"),
+    axis.title.y.right = element_text(size = 12, face = "bold")
+  )
+
+p_diversity_surface
+```
+
+
+
+
+# Ahora para subsurface (ex-Bottom)
+
+```{r}
+# Asegurarse de que exista la columna 'Day' en class_bottom
+class_bottom <- class_bottom %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", X)))
+
+# Calcular Shannon y Simpson por muestra
+diversity_df_bottom <- class_bottom %>%
+  select(X, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(
+    Shannon = diversity(c_across(where(is.numeric)), index = "shannon"),
+    Simpson = diversity(c_across(where(is.numeric)), index = "simpson")
+  ) %>%
+  ungroup()
+
+# Promedios y errores estándar por día
+summary_diversity_bottom <- diversity_df_bottom %>%
+  pivot_longer(cols = c("Shannon", "Simpson"), names_to = "Metric", values_to = "Mean") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Mean),
+    SE = sd(Mean) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+summary_diversity_bottom <- diversity_df_bottom %>%
+  pivot_longer(cols = c("Shannon", "Simpson"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+summary_diversity_bottom_scaled <- summary_diversity_bottom %>%
+  mutate(
+    DisplayValue = ifelse(Metric == "Simpson", Mean * 4, Mean),
+    SE_scaled = ifelse(Metric == "Simpson", SE * 4, SE)
+  )
+```
+
+```{r}
+# Etiquetas de días
+ticks <- c(10, 12, 14, 16, 18, 20, 24, 38, 50)
+labels <- paste0("Day-", ticks)
+
+# Colores
+div_colors <- c("Shannon" = "#1f77b4", "Simpson" = "#d62728")
+
+# Plot para Subsurface
+ggplot(summary_diversity_bottom_scaled, aes(x = Day, y = DisplayValue, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = DisplayValue - SE_scaled, ymax = DisplayValue + SE_scaled), width = 1.2) +
+  scale_color_manual(values = div_colors) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~ . / 4, name = "Simpson Index")
+  ) +
+  theme_minimal() +
+  labs(x = "Day", color = "Metric") +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black")
+  )
+
+```
+
+#Ahora para Bacterias Bottom
+
+```{r}
+bac_bottom <- bac_data %>%
+  filter(grepl("^Bottom", ID)) %>%
+  mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID)))
+```
+
+```{r}
+diversity_bottom <- bac_bottom %>%
+  select(ID, Day, where(is.numeric)) %>%
+  rowwise() %>%
+  mutate(
+    Shannon = diversity(c_across(where(is.numeric)), index = "shannon"),
+    Simpson = diversity(c_across(where(is.numeric)), index = "simpson")
+  ) %>%
+  ungroup()
+```
+
+
+```{r}
+summary_div_bottom <- diversity_bottom %>%
+  pivot_longer(cols = c("Shannon", "Simpson"), names_to = "Metric", values_to = "Value") %>%
+  group_by(Day, Metric) %>%
+  summarise(
+    Mean = mean(Value),
+    SE = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+summary_div_bottom_scaled <- summary_div_bottom %>%
+  mutate(
+    DisplayValue = ifelse(Metric == "Simpson", Mean * 4, Mean),
+    SE_scaled = ifelse(Metric == "Simpson", SE * 4, SE)
+  )
+```
+
+
+```{r}
+# Etiquetas del eje X
+ticks <- c(2, 10, 12, 14, 16, 18, 20, 24, 38, 40, 44)
+labels <- paste0("Day-", ticks)
+
+# Colores consistentes
+div_colors <- c("Shannon" = "#1f77b4", "Simpson" = "#d62728")
+
+# Plot
+ggplot(summary_div_bottom_scaled, aes(x = Day, y = DisplayValue, color = Metric, group = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 0.7) +
+  geom_errorbar(aes(ymin = DisplayValue - SE_scaled, ymax = DisplayValue + SE_scaled), width = 1.2) +
+  scale_color_manual(values = div_colors) +
+  scale_x_continuous(breaks = ticks, labels = labels) +
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~ . / 4, name = "Simpson Index")
+  ) +
+  theme_minimal() +
+  labs(x = "Day", color = "Metric") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 1)
+  )
+
+```
+```{r}
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+#           COMBINAMOS BOTTOM LIPIDOS Y 16S PARA INDICES DE DIVERSIDAD
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+# Agregar columna de tipo de dato para ambos datasets
+summary_div_lipidos_bottom <- summary_diversity_bottom %>% 
+  mutate(Tipo = "Lipidos")
+
+summary_div_16s_bottom <- summary_div_bottom %>% 
+  mutate(Tipo = "16S")
+
+# Combinar ambos datasets
+combined_diversity_bottom <- bind_rows(summary_div_lipidos_bottom, summary_div_16s_bottom)
+
+# Crear la combinación de tipo de dato y métrica
+combined_diversity_bottom <- combined_diversity_bottom %>%
+  mutate(Combo = paste(Tipo, Metric, sep = "-"))
+
+# Colores personalizados para las diferentes combinaciones
+# Lípidos: tonos rojos, 16S: tonos azules
+ my_div_colors <- c(
+  "Lipidos-Shannon" = "#8C510A",   # marrón oscuro para IPL-Shannon
+  "Lipidos-Simpson" = "#D8B365",   # marrón claro para IPL-Simpson
+  "16S-Shannon" = "#01665E",       # verde esmeralda oscuro para 16S-Shannon
+  "16S-Simpson" = "#5AB4AC"        # verde agua para 16S-Simpson
+)
+ 
+# Separar los datos por índice
+shannon_data_bottom <- combined_diversity_bottom %>% 
+  filter(Metric == "Shannon")
+
+simpson_data_bottom <- combined_diversity_bottom %>% 
+  filter(Metric == "Simpson")
+
+# Calcular factor de escala para Simpson
+scale_factor_simpson_bottom <- max(shannon_data_bottom$Mean) / max(simpson_data_bottom$Mean)
+
+# Graficar
+p_diversity_bottom <- ggplot() +
+  # Shannon indices
+  geom_point(data = shannon_data_bottom, aes(x = Day, y = Mean, color = Combo), size = 3) +
+  geom_line(data = shannon_data_bottom, aes(x = Day, y = Mean, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = shannon_data_bottom, aes(x = Day, ymin = Mean - SE, ymax = Mean + SE, color = Combo), width = 1.2) +
+  
+  # Simpson indices (escalados)
+  geom_point(data = simpson_data_bottom, aes(x = Day, y = Mean * scale_factor_simpson_bottom, color = Combo), size = 3) +
+  geom_line(data = simpson_data_bottom, aes(x = Day, y = Mean * scale_factor_simpson_bottom, color = Combo, group = Combo), size = 0.7) +
+  geom_errorbar(data = simpson_data_bottom, aes(x = Day, ymin = (Mean - SE) * scale_factor_simpson_bottom, 
+                                                ymax = (Mean + SE) * scale_factor_simpson_bottom, color = Combo), width = 1.2) +
+  
+  # Ejes Y dobles
+  scale_y_continuous(
+    name = "Shannon Index",
+    sec.axis = sec_axis(~./scale_factor_simpson_bottom, name = "Simpson Index")
+  ) +
+  
+  # Colores y estilo
+  scale_color_manual(
+    values = my_div_colors,
+    labels = c(
+      "Lipidos-Shannon" = "IPL - Shannon",
+      "Lipidos-Simpson" = "IPL - Simpson",
+      "16S-Shannon" = "16S rRNA - Shannon",
+      "16S-Simpson" = "16S rRNA - Simpson"
+    )
+  ) +
+  
+  theme_minimal() +
+  labs(x = "Day", title = "Bottom - Diversity Indices Comparison") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.title.y.left = element_text(size = 12, face = "bold"),
+    axis.title.y.right = element_text(size = 12, face = "bold")
+  )
+
+p_diversity_bottom
+
+# Si quieres comparar Surface y Bottom lado a lado:
+library(gridExtra)
+#grid.arrange(p_diversity_surface, p_diversity_bottom, ncol = 2)
+
+# O si prefieres una comparación vertical:
+grid.arrange(p_diversity_surface, p_diversity_bottom, ncol = 1)
+
+# Si quieres guardar los gráficos:
+# ggsave("Surface_Diversity_Comparison.png", p_diversity_surface, width = 12, height = 8, dpi = 300)
+# ggsave("Bottom_Diversity_Comparison.png", p_diversity_bottom, width = 12, height = 8, dpi = 300)
+```
+
+
+```{r}
+# Alternativa más explícita
+combined_plot_4rows <- arrangeGrob(
+  p1,
+  p_bottom,
+  p_diversity_surface,
+  p_diversity_bottom,
+  layout_matrix = rbind(c(1), c(2), c(3), c(4)),
+  heights = c(1, 1, 1, 1),
+  widths = c(1),
+  top = textGrob(main_title, gp = gpar(fontsize = 16, fontface = "bold"))
+)
+
+# Mostrar
+grid.draw(combined_plot_4rows)
+
+# Guardar
+#ggsave("Combined_Analysis_4rows.png", combined_plot_4rows, width = 10, height = 24, dpi = 300)
+```
+
+
+# Vamos a agregar las Rates
+
+```{r, message=FALSE}
+rates <- read.delim("~/Documents/SIC_EFR_PROJECT/Sebastian_Data/Rates.csv", 
+                    sep = ",", header = TRUE)
+```
+
+```{r}
+# Preparar datos para cada variable
+denit_data <- subsurface_data %>%
+  filter(!is.na(denit_mean)) %>%
+  arrange(Day)
+
+anammox_data <- subsurface_data %>%
+  filter(!is.na(anammox_mean)) %>%
+  arrange(Day)
+
+nfix_data <- subsurface_data %>%
+  filter(!is.na(nfix_mean)) %>%
+  arrange(Day)
+
+# Crear el gráfico
+p_rates <- ggplot() +
+  # Denitrificación
+  geom_line(data = denit_data, aes(x = Day, y = denit_mean, color = "Denitrification rate"), size = 0.7) +
+  geom_point(data = denit_data, aes(x = Day, y = denit_mean, color = "Denitrification rate"), size = 3) +
+  geom_errorbar(data = denit_data, aes(x = Day, ymin = denit_mean - denit_se, ymax = denit_mean + denit_se), 
+                color = "#D7191C", width = 0.8) +
+  
+  # Anammox
+  geom_line(data = anammox_data, aes(x = Day, y = anammox_mean * scale_factor, color = "Anammox rate"), size = 0.7) +
+  geom_point(data = anammox_data, aes(x = Day, y = anammox_mean * scale_factor, color = "Anammox rate"), size = 3) +
+  geom_errorbar(data = anammox_data, aes(x = Day, ymin = (anammox_mean - anammox_se) * scale_factor, 
+                    ymax = (anammox_mean + anammox_se) * scale_factor), 
+                color = "#2166AC", width = 0.8) +
+  
+  # Fijación de nitrógeno
+  geom_line(data = nfix_data, aes(x = Day, y = nfix_mean * scale_factor, color = "N-Fixation rate"), size = 0.7) +
+  geom_point(data = nfix_data, aes(x = Day, y = nfix_mean * scale_factor, color = "N-Fixation rate"), size = 3) +
+  geom_errorbar(data = nfix_data, aes(x = Day, ymin = (nfix_mean - nfix_se) * scale_factor, 
+                    ymax = (nfix_mean + nfix_se) * scale_factor), 
+                color = "#1B7837", width = 0.8) +
+  
+  # Escalas de color
+  scale_color_manual(
+    name = "Nitrogen Process",
+    values = c("Denitrification rate" = "#D7191C", 
+               "Anammox rate" = "#2166AC", 
+               "N-Fixation rate" = "#1B7837")
+  ) +
+  
+  scale_x_continuous(breaks = seq(0, 50, 10)) +
+  scale_y_continuous(
+    name = expression("Denitrification rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+    sec.axis = sec_axis(~./scale_factor, 
+                        name = expression("Anammox & N-Fix rates (nmol N"[2]*" L"^-1*" h"^-1*")"))
+  ) +
+  
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.line = element_line(color = "black"),
+    panel.grid.minor = element_blank(),
+    legend.position = "right"
+  )
+
+p_rates
+```
+
+```{r}
+# Agregar p_rates al panel de 5 filas
+combined_plot_5rows <- arrangeGrob(
+  p1,
+  p_bottom,
+  p_diversity_surface,
+  p_diversity_bottom,
+  p_rates,
+  layout_matrix = rbind(c(1), c(2), c(3), c(4), c(5)),
+  heights = c(1, 1, 1, 1, 1),
+  widths = c(1),
+  top = textGrob(main_title, gp = gpar(fontsize = 16, fontface = "bold"))
+)
+
+# Mostrar
+grid.draw(combined_plot_5rows)
+
+# Guardar
+#ggsave("Combined_Analysis_5rows.png", combined_plot_5rows, width = 10, height = 28, dpi = 300)
+```
+
+# nueva diversdad
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+rates <- read.delim("~/Documents/SIC_EFR_PROJECT/Sebastian_Data/Rates.csv", sep = ",", header = TRUE,
+                     na.strings = c("NA", "NaN", "NAN", ""))
+
+## Una tasa de fijación de N no puede ser negativa en este contexto oceanográfico:
+## los valores negativos son ruido de la medición cerca de cero. Se truncan a
+## nivel de réplica individual (antes de promediar), para que la media y el SE
+## ya reflejen la corrección.
+rates <- rates %>% mutate(N_Fix = pmax(N_Fix, 0, na.rm = FALSE))
+
+## ---- Resumen (media +/- SE) por Day y Depth para cada variable ----
+summarise_rate <- function(df, depth_name, value_col) {
+  df %>%
+    filter(Depth == depth_name, !is.na(.data[[value_col]])) %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(.data[[value_col]]),
+              SE = sd(.data[[value_col]]) / sqrt(n()),
+              .groups = "drop")
+}
+
+nfix_surface    <- summarise_rate(rates, "Surface",    "N_Fix")
+nfix_subsurface <- summarise_rate(rates, "Subsurface", "N_Fix")
+denit_subsurface <- summarise_rate(rates, "Subsurface", "denitri_rate")
+anammox_subsurface <- summarise_rate(rates, "Subsurface", "anammox_rate")
+
+## =====================================================================
+##  FASES (igual que en las figuras anteriores)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I" = "#8C1D40", "Phase II" = "#F2A93B",
+                   "Phase III" = "#AEE1C8", "Phase IV" = "#3D7EB5")
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+make_phase_strip <- function() {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    theme_void() +
+    theme(legend.position = "none", plot.margin = margin(0, 5.5, 0, 5.5))
+}
+
+process_colors <- c("Denitrification rate" = "#D7191C",
+                     "Anammox rate"        = "#2166AC",
+                     "N-Fixation rate"     = "#1B7837")
+
+## =====================================================================
+##  PANEL E: Surface -> solo N-Fixation (unico proceso medido en Surface)
+## =====================================================================
+make_surface_rates_plot <- function() {
+  ggplot(nfix_surface, aes(x = Day, y = Mean)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(color = process_colors[["N-Fixation rate"]], linewidth = 0.7) +
+    geom_point(color = process_colors[["N-Fixation rate"]], size = 3) +
+    geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE),
+                  color = process_colors[["N-Fixation rate"]], width = 0.8) +
+    scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+    labs(x = "Day", y = expression("N-Fixation rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+         title = "Surface") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5)
+    )
+}
+
+## =====================================================================
+##  PANEL F: Subsurface -> Denitrification + Anammox + N-Fixation
+## =====================================================================
+make_subsurface_rates_plot <- function() {
+
+  denit_range <- range(c(denit_subsurface$Mean - denit_subsurface$SE,
+                          denit_subsurface$Mean + denit_subsurface$SE), na.rm = TRUE)
+  other_vals  <- c(anammox_subsurface$Mean - anammox_subsurface$SE,
+                    anammox_subsurface$Mean + anammox_subsurface$SE,
+                    nfix_subsurface$Mean - nfix_subsurface$SE,
+                    nfix_subsurface$Mean + nfix_subsurface$SE)
+  other_range <- range(other_vals, na.rm = TRUE)
+
+  b <- diff(denit_range) / diff(other_range)
+  a <- denit_range[1] - b * other_range[1]
+
+  anammox_s <- anammox_subsurface %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  nfix_s    <- nfix_subsurface    %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  denit_s   <- denit_subsurface   %>% mutate(Mean_s = Mean, SE_s = SE)
+
+  ggplot() +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+
+    geom_line(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), linewidth = 0.7) +
+    geom_point(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), size = 3) +
+    geom_errorbar(data = denit_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                       color = "Denitrification rate"), width = 0.8) +
+
+    geom_line(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), linewidth = 0.7) +
+    geom_point(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), size = 3) +
+    geom_errorbar(data = anammox_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                         color = "Anammox rate"), width = 0.8) +
+
+    geom_line(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), linewidth = 0.7) +
+    geom_point(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), size = 3) +
+    geom_errorbar(data = nfix_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                      color = "N-Fixation rate"), width = 0.8) +
+
+    scale_color_manual(name = "Nitrogen Process", values = process_colors) +
+    scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+    scale_y_continuous(
+      name = expression("Denitrification rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+      sec.axis = sec_axis(~ (. - a) / b,
+                           name = expression("Anammox & N-Fix rates (nmol N"[2]*" L"^-1*" h"^-1*")"))
+    ) +
+    labs(x = "Day", title = "Subsurface") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+p_E_surface_rates    <- make_phase_strip() / make_surface_rates_plot()    + plot_layout(heights = c(0.07, 1))
+p_F_subsurface_rates <- make_phase_strip() / make_subsurface_rates_plot() + plot_layout(heights = c(0.07, 1))
+
+combined_rates <- (p_E_surface_rates | p_F_subsurface_rates) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+combined_rates
+```
+
+
+#----------------------------------------------------------------------------------------------------------
+#                                      Final diversity supplementary
+#----------------------------------------------------------------------------------------------------------
+
+# Chao1 indice de Riqueza
+
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+ipl_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                        sep = ",", header = TRUE)
+bac_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                        sep = ",", header = TRUE)
+
+calc_chao1 <- function(x) {
+  x <- round(x)
+  est <- estimateR(x)
+  data.frame(Chao1 = est["S.chao1"])
+}
+
+get_summary <- function(df, pattern, id_col) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(temp = list(calc_chao1(c_across(where(is.numeric) & !matches("^Day$"))))) %>%
+    unnest(temp) %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Chao1), SE = sd(Chao1) / sqrt(n()), .groups = "drop")
+}
+
+ipl_surface <- get_summary(ipl_data, "^Surface", "X") %>% mutate(DataType = "Lipids (IPL)")
+ipl_bottom  <- get_summary(ipl_data, "^Bottom",  "X") %>% mutate(DataType = "Lipids (IPL)")
+bac_surface <- get_summary(bac_data, "^Surface", "ID") %>% mutate(DataType = "16S rRNA")
+bac_bottom  <- get_summary(bac_data, "^Bottom",  "ID") %>% mutate(DataType = "16S rRNA")
+
+## ---- Constructor de gráfico con doble eje ----
+make_dual_plot <- function(ipl_df, bac_df, layer_name) {
+
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>%
+    mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+
+  plot_df <- bind_rows(
+    ipl_df %>% mutate(Mean_s = Mean, SE_s = SE),
+    bac_df_scaled
+  ) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  all_days <- sort(unique(plot_df$Day))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")) +
+    scale_y_continuous(
+      name = "Chao1 index (Lipids, IPL)",
+      sec.axis = sec_axis(~ (. - a) / b, name = "Chao1 index (16S rRNA)")
+    ) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days)) +
+    labs(x = "Day", color = "Data type", title = layer_name) +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = "#4393C3"),
+      axis.text.y.left = element_text(color = "#4393C3"),
+      axis.title.y.right = element_text(color = "#D6604D"),
+      axis.text.y.right = element_text(color = "#D6604D"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+p_A <- make_dual_plot(ipl_surface, bac_surface, "Surface")
+p_B <- make_dual_plot(ipl_bottom,  bac_bottom,  "Subsurface")
+
+combined <- (p_A + p_B) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    legend.position = "top",
+    plot.tag = element_text(face = "bold", size = 14)
+  )
+
+combined   # solo se muestra en pantalla, no se guarda
+```
+
+#Ahora diversity
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+ipl_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                        sep = ",", header = TRUE)
+bac_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                        sep = ",", header = TRUE)
+
+## ---- Función: Shannon medio +/- SE por día y capa ----
+get_shannon_summary <- function(df, pattern, id_col) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(Shannon = diversity(c_across(where(is.numeric) & !matches("^Day$")), index = "shannon")) %>%
+    ungroup() %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Shannon), SE = sd(Shannon) / sqrt(n()), .groups = "drop")
+}
+
+ipl_surface <- get_shannon_summary(ipl_data, "^Surface", "X") %>% mutate(DataType = "Lipids (IPL)")
+ipl_bottom  <- get_shannon_summary(ipl_data, "^Bottom",  "X") %>% mutate(DataType = "Lipids (IPL)")
+bac_surface <- get_shannon_summary(bac_data, "^Surface", "ID") %>% mutate(DataType = "16S rRNA")
+bac_bottom  <- get_shannon_summary(bac_data, "^Bottom",  "ID") %>% mutate(DataType = "16S rRNA")
+
+## ---- Constructor de gráfico con doble eje (misma lógica que Chao1) ----
+make_dual_plot_shannon <- function(ipl_df, bac_df, layer_name) {
+
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>%
+    mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+
+  plot_df <- bind_rows(
+    ipl_df %>% mutate(Mean_s = Mean, SE_s = SE),
+    bac_df_scaled
+  ) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  all_days <- sort(unique(plot_df$Day))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")) +
+    scale_y_continuous(
+      name = "Shannon index (Lipids, IPL)",
+      sec.axis = sec_axis(~ (. - a) / b, name = "Shannon index (16S rRNA)")
+    ) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days)) +
+    labs(x = "Day", color = "Data type", title = layer_name) +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = "#4393C3"),
+      axis.text.y.left = element_text(color = "#4393C3"),
+      axis.title.y.right = element_text(color = "#D6604D"),
+      axis.text.y.right = element_text(color = "#D6604D"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+p_A <- make_dual_plot_shannon(ipl_surface, bac_surface, "Surface")
+p_B <- make_dual_plot_shannon(ipl_bottom,  bac_bottom,  "Subsurface")
+
+## ---- Combinar: Panel A (Surface) izquierda, Panel B (Subsurface) derecha ----
+combined <- (p_A + p_B) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    legend.position = "top",
+    plot.tag = element_text(face = "bold", size = 14)
+  )
+
+combined
+```
+
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+ipl_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                        sep = ",", header = TRUE)
+bac_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                        sep = ",", header = TRUE)
+
+## ---- Función genérica: resumen (media +/- SE) por día y capa para un índice dado ----
+get_index_summary <- function(df, pattern, id_col, index_fun) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(Value = index_fun(c_across(where(is.numeric) & !matches("^Day$")))) %>%
+    ungroup() %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+}
+
+chao1_fun   <- function(x) estimateR(round(x))["S.chao1"]
+shannon_fun <- function(x) diversity(x, index = "shannon")
+
+## ---- Riqueza (Chao1) ----
+rich_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+rich_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+
+## ---- Diversidad (Shannon) ----
+div_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+div_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+
+## ---- Paletas: una familia de colores para riqueza, otra para diversidad ----
+palette_richness  <- c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")  # azul / rojo
+palette_diversity <- c("Lipids (IPL)" = "#2CA25F", "16S rRNA" = "#88419D")  # verde / morado
+
+## ---- Constructor de gráfico con doble eje (recibe la paleta como argumento) ----
+make_dual_plot <- function(ipl_df, bac_df, layer_name, index_name, colors) {
+
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>%
+    mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+
+  plot_df <- bind_rows(
+    ipl_df %>% mutate(Mean_s = Mean, SE_s = SE),
+    bac_df_scaled
+  ) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  all_days <- sort(unique(plot_df$Day))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = colors) +
+    scale_y_continuous(
+      name = paste0(index_name, " index (Lipids, IPL)"),
+      sec.axis = sec_axis(~ (. - a) / b, name = paste0(index_name, " index (16S rRNA)"))
+    ) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days)) +
+    labs(x = "Day", color = "Data type", title = layer_name) +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.text.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.title.y.right = element_text(color = colors[["16S rRNA"]]),
+      axis.text.y.right = element_text(color = colors[["16S rRNA"]]),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+## ---- Panel A/B: Riqueza (Chao1) - paleta azul/rojo ----
+p_A_rich <- make_dual_plot(rich_ipl_surface, rich_bac_surface, "Surface",    "Chao1", palette_richness)
+p_B_rich <- make_dual_plot(rich_ipl_bottom,  rich_bac_bottom,  "Subsurface", "Chao1", palette_richness)
+
+## ---- Panel C/D: Diversidad (Shannon) - paleta verde/morado ----
+p_C_div <- make_dual_plot(div_ipl_surface, div_bac_surface, "Surface",    "Shannon", palette_diversity)
+p_D_div <- make_dual_plot(div_ipl_bottom,  div_bac_bottom,  "Subsurface", "Shannon", palette_diversity)
+
+## ---- Unir todo: A,B arriba (riqueza) / C,D abajo (diversidad) ----
+## Nota: como cada fila usa una paleta distinta, ya no se puede usar una sola
+## leyenda "collect" (patchwork la fusionaría de forma incorrecta). Cada fila
+## conserva su propia leyenda arriba.
+combined_full <- (p_A_rich + p_B_rich) / (p_C_div + p_D_div) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+combined_full
+```
+
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+ipl_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                        sep = ",", header = TRUE)
+bac_data <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                        sep = ",", header = TRUE)
+
+## ---- Función genérica: resumen (media +/- SE) por día y capa para un índice dado ----
+get_index_summary <- function(df, pattern, id_col, index_fun) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(Value = index_fun(c_across(where(is.numeric) & !matches("^Day$")))) %>%
+    ungroup() %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+}
+
+chao1_fun   <- function(x) estimateR(round(x))["S.chao1"]
+shannon_fun <- function(x) diversity(x, index = "shannon")
+
+rich_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+rich_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+
+div_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+div_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+
+palette_richness  <- c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")
+palette_diversity <- c("Lipids (IPL)" = "#2CA25F", "16S rRNA" = "#88419D")
+
+## =====================================================================
+##  DEFINICIÓN DE FASES (igual que en Fig. 2)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I"   = "#8C1D40",   # granate
+                   "Phase II"  = "#F2A93B",   # naranja
+                   "Phase III" = "#AEE1C8",   # menta
+                   "Phase IV"  = "#3D7EB5")   # azul
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+## ---- Franja superior de fases (se coloca encima de cada gráfico) ----
+make_phase_strip <- function() {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    theme_void() +
+    theme(legend.position = "none",
+          plot.margin = margin(0, 5.5, 0, 5.5))
+}
+
+## ---- Constructor de gráfico principal con doble eje + líneas de fase ----
+make_dual_plot <- function(ipl_df, bac_df, layer_name, index_name, colors) {
+
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>%
+    mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+
+  plot_df <- bind_rows(
+    ipl_df %>% mutate(Mean_s = Mean, SE_s = SE),
+    bac_df_scaled
+  ) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  all_days <- sort(unique(plot_df$Day))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = colors) +
+    scale_y_continuous(
+      name = paste0(index_name, " index (Lipids, IPL)"),
+      sec.axis = sec_axis(~ (. - a) / b, name = paste0(index_name, " index (16S rRNA)"))
+    ) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days), limits = x_limits) +
+    labs(x = "Day", color = "Data type", title = layer_name) +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.text.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.title.y.right = element_text(color = colors[["16S rRNA"]]),
+      axis.text.y.right = element_text(color = colors[["16S rRNA"]]),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+## ---- Combina franja de fases + gráfico principal en un solo bloque ----
+make_panel_with_phases <- function(ipl_df, bac_df, layer_name, index_name, colors) {
+  strip <- make_phase_strip()
+  main  <- make_dual_plot(ipl_df, bac_df, layer_name, index_name, colors)
+  strip / main + plot_layout(heights = c(0.07, 1))
+}
+
+## ---- Panel A/B: Riqueza (Chao1) ----
+p_A_rich <- make_panel_with_phases(rich_ipl_surface, rich_bac_surface, "Surface",    "Chao1", palette_richness)
+p_B_rich <- make_panel_with_phases(rich_ipl_bottom,  rich_bac_bottom,  "Subsurface", "Chao1", palette_richness)
+
+## ---- Panel C/D: Diversidad (Shannon) ----
+p_C_div <- make_panel_with_phases(div_ipl_surface, div_bac_surface, "Surface",    "Shannon", palette_diversity)
+p_D_div <- make_panel_with_phases(div_ipl_bottom,  div_bac_bottom,  "Subsurface", "Shannon", palette_diversity)
+
+## ---- Unir todo: A,B arriba (riqueza) / C,D abajo (diversidad) ----
+combined_full <- (p_A_rich | p_B_rich) / (p_C_div | p_D_div) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+combined_full
+```
+
+
+# combinados cuasi-finales
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## ---- Cargar datos ----
+rates <- read.delim("~/Documents/SIC_EFR_PROJECT/Sebastian_Data/Rates.csv", sep = ",", header = TRUE,
+                     na.strings = c("NA", "NaN", "NAN", ""))
+
+## Una tasa de fijación de N no puede ser negativa en este contexto oceanográfico:
+## los valores negativos son ruido de la medición cerca de cero. Se truncan a
+## nivel de réplica individual (antes de promediar), para que la media y el SE
+## ya reflejen la corrección.
+rates <- rates %>% mutate(N_Fix = pmax(N_Fix, 0, na.rm = FALSE))
+
+## ---- Resumen (media +/- SE) por Day y Depth para cada variable ----
+summarise_rate <- function(df, depth_name, value_col) {
+  df %>%
+    filter(Depth == depth_name, !is.na(.data[[value_col]])) %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(.data[[value_col]]),
+              SE = sd(.data[[value_col]]) / sqrt(n()),
+              .groups = "drop")
+}
+
+nfix_surface    <- summarise_rate(rates, "Surface",    "N_Fix")
+nfix_subsurface <- summarise_rate(rates, "Subsurface", "N_Fix")
+denit_subsurface <- summarise_rate(rates, "Subsurface", "denitri_rate")
+anammox_subsurface <- summarise_rate(rates, "Subsurface", "anammox_rate")
+
+## =====================================================================
+##  FASES (igual que en las figuras anteriores)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I" = "#8C1D40", "Phase II" = "#F2A93B",
+                   "Phase III" = "#AEE1C8", "Phase IV" = "#3D7EB5")
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+make_phase_strip <- function() {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    theme_void() +
+    theme(legend.position = "none", plot.margin = margin(0, 5.5, 0, 5.5))
+}
+
+process_colors <- c("Denitrification rate" = "#D7191C",
+                     "Anammox rate"        = "#2166AC",
+                     "N-Fixation rate"     = "#1B7837")
+
+## =====================================================================
+##  PANEL E: Surface -> solo N-Fixation (unico proceso medido en Surface)
+## =====================================================================
+make_surface_rates_plot <- function() {
+  ggplot(nfix_surface, aes(x = Day, y = Mean)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(color = process_colors[["N-Fixation rate"]], linewidth = 0.7) +
+    geom_point(color = process_colors[["N-Fixation rate"]], size = 3) +
+    geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE),
+                  color = process_colors[["N-Fixation rate"]], width = 0.8) +
+    scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+    labs(x = "Day", y = expression("N-Fixation rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+         title = "Surface") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5)
+    )
+}
+
+## =====================================================================
+##  PANEL F: Subsurface -> Denitrification + Anammox + N-Fixation
+## =====================================================================
+make_subsurface_rates_plot <- function() {
+
+  denit_range <- range(c(denit_subsurface$Mean - denit_subsurface$SE,
+                          denit_subsurface$Mean + denit_subsurface$SE), na.rm = TRUE)
+  other_vals  <- c(anammox_subsurface$Mean - anammox_subsurface$SE,
+                    anammox_subsurface$Mean + anammox_subsurface$SE,
+                    nfix_subsurface$Mean - nfix_subsurface$SE,
+                    nfix_subsurface$Mean + nfix_subsurface$SE)
+  other_range <- range(other_vals, na.rm = TRUE)
+
+  b <- diff(denit_range) / diff(other_range)
+  a <- denit_range[1] - b * other_range[1]
+
+  anammox_s <- anammox_subsurface %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  nfix_s    <- nfix_subsurface    %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  denit_s   <- denit_subsurface   %>% mutate(Mean_s = Mean, SE_s = SE)
+
+  ggplot() +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+
+    geom_line(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), linewidth = 0.7) +
+    geom_point(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), size = 3) +
+    geom_errorbar(data = denit_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                       color = "Denitrification rate"), width = 0.8) +
+
+    geom_line(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), linewidth = 0.7) +
+    geom_point(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), size = 3) +
+    geom_errorbar(data = anammox_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                         color = "Anammox rate"), width = 0.8) +
+
+    geom_line(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), linewidth = 0.7) +
+    geom_point(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), size = 3) +
+    geom_errorbar(data = nfix_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s,
+                                      color = "N-Fixation rate"), width = 0.8) +
+
+    scale_color_manual(name = "Nitrogen Process", values = process_colors) +
+    scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+    scale_y_continuous(
+      name = expression("Denitrification rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+      sec.axis = sec_axis(~ (. - a) / b,
+                           name = expression("Anammox & N-Fix rates (nmol N"[2]*" L"^-1*" h"^-1*")"))
+    ) +
+    labs(x = "Day", title = "Subsurface") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top"
+    )
+}
+
+p_E_surface_rates    <- make_phase_strip() / make_surface_rates_plot()    + plot_layout(heights = c(0.07, 1))
+p_F_subsurface_rates <- make_phase_strip() / make_subsurface_rates_plot() + plot_layout(heights = c(0.07, 1))
+
+combined_rates <- (p_E_surface_rates | p_F_subsurface_rates) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+combined_rates
+```
+
+
+# Un ssolo codigo
+
+```{r}
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+## =====================================================================
+##  CARGAR DATOS
+## =====================================================================
+ipl_data  <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                         sep = ",", header = TRUE)
+bac_data  <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                         sep = ",", header = TRUE)
+rates     <- read.delim("~/Documents/SIC_EFR_PROJECT/Sebastian_Data/Rates.csv", sep = ",", header = TRUE,
+                         na.strings = c("NA", "NaN", "NAN", ""))
+rates <- rates %>% mutate(N_Fix = pmax(N_Fix, 0, na.rm = FALSE))
+
+## =====================================================================
+##  FASES (definición única, reutilizada por todo)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I" = "#8C1D40", "Phase II" = "#F2A93B",
+                   "Phase III" = "#AEE1C8", "Phase IV" = "#3D7EB5")
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+make_phase_strip <- function(layer_name) {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    labs(title = layer_name) +
+    theme_void() +
+    theme(legend.position = "none",
+          plot.margin = margin(2, 5.5, 0, 5.5),
+          plot.title = element_text(face = "bold", hjust = 0.5, size = 12))
+}
+
+## =====================================================================
+##  RIQUEZA (Chao1) y DIVERSIDAD (Shannon) - IPL vs 16S
+## =====================================================================
+get_index_summary <- function(df, pattern, id_col, index_fun) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(Value = index_fun(c_across(where(is.numeric) & !matches("^Day$")))) %>%
+    ungroup() %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+}
+chao1_fun   <- function(x) estimateR(round(x))["S.chao1"]
+shannon_fun <- function(x) diversity(x, index = "shannon")
+
+rich_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+rich_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+
+div_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+div_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+
+palette_richness  <- c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")
+palette_diversity <- c("Lipids (IPL)" = "#2CA25F", "16S rRNA" = "#88419D")
+
+## ---- Constructor de gráfico principal (SIN franja de fases; solo líneas discontinuas) ----
+make_dual_plot <- function(ipl_df, bac_df, index_name, colors) {
+
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  plot_df <- bind_rows(ipl_df %>% mutate(Mean_s = Mean, SE_s = SE), bac_df_scaled) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  all_days <- sort(unique(plot_df$Day))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = colors) +
+    scale_y_continuous(
+      name = paste0(index_name, " index (Lipids, IPL)"),
+      sec.axis = sec_axis(~ (. - a) / b, name = paste0(index_name, " index (16S rRNA)"))
+    ) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days), limits = x_limits) +
+    labs(x = "Day", color = "Data type") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.text.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.title.y.right = element_text(color = colors[["16S rRNA"]]),
+      axis.text.y.right = element_text(color = colors[["16S rRNA"]]),
+      legend.position = "top"
+    )
+}
+
+p_rich_surface <- make_dual_plot(rich_ipl_surface, rich_bac_surface, "Chao1",   palette_richness)
+p_rich_bottom  <- make_dual_plot(rich_ipl_bottom,  rich_bac_bottom,  "Chao1",   palette_richness)
+p_div_surface  <- make_dual_plot(div_ipl_surface,  div_bac_surface,  "Shannon", palette_diversity)
+p_div_bottom   <- make_dual_plot(div_ipl_bottom,   div_bac_bottom,  "Shannon", palette_diversity)
+
+## =====================================================================
+##  TASAS DE NITRÓGENO
+## =====================================================================
+summarise_rate <- function(df, depth_name, value_col) {
+  df %>%
+    filter(Depth == depth_name, !is.na(.data[[value_col]])) %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(.data[[value_col]]), SE = sd(.data[[value_col]]) / sqrt(n()), .groups = "drop")
+}
+nfix_surface        <- summarise_rate(rates, "Surface",    "N_Fix")
+nfix_subsurface     <- summarise_rate(rates, "Subsurface", "N_Fix")
+denit_subsurface    <- summarise_rate(rates, "Subsurface", "denitri_rate")
+anammox_subsurface  <- summarise_rate(rates, "Subsurface", "anammox_rate")
+
+process_colors <- c("Denitrification rate" = "#D7191C",
+                     "Anammox rate"        = "#2166AC",
+                     "N-Fixation rate"     = "#1B7837")
+
+p_rates_surface <- ggplot(nfix_surface, aes(x = Day, y = Mean)) +
+  geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+  geom_line(color = process_colors[["N-Fixation rate"]], linewidth = 0.7) +
+  geom_point(color = process_colors[["N-Fixation rate"]], size = 3) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), color = process_colors[["N-Fixation rate"]], width = 0.8) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+  labs(x = "Day", y = expression("N-Fixation rate (nmol N"[2]*" L"^-1*" h"^-1*")")) +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA),
+        axis.line = element_line(color = "black"),
+        panel.grid.minor = element_blank())
+
+denit_range <- range(c(denit_subsurface$Mean - denit_subsurface$SE, denit_subsurface$Mean + denit_subsurface$SE), na.rm = TRUE)
+other_range <- range(c(anammox_subsurface$Mean - anammox_subsurface$SE, anammox_subsurface$Mean + anammox_subsurface$SE,
+                        nfix_subsurface$Mean - nfix_subsurface$SE, nfix_subsurface$Mean + nfix_subsurface$SE), na.rm = TRUE)
+b_r <- diff(denit_range) / diff(other_range)
+a_r <- denit_range[1] - b_r * other_range[1]
+anammox_s <- anammox_subsurface %>% mutate(Mean_s = a_r + b_r * Mean, SE_s = b_r * SE)
+nfix_s    <- nfix_subsurface    %>% mutate(Mean_s = a_r + b_r * Mean, SE_s = b_r * SE)
+denit_s   <- denit_subsurface   %>% mutate(Mean_s = Mean, SE_s = SE)
+
+p_rates_subsurface <- ggplot() +
+  geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+  geom_line(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), linewidth = 0.7) +
+  geom_point(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), size = 3) +
+  geom_errorbar(data = denit_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "Denitrification rate"), width = 0.8) +
+  geom_line(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), linewidth = 0.7) +
+  geom_point(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), size = 3) +
+  geom_errorbar(data = anammox_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "Anammox rate"), width = 0.8) +
+  geom_line(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), linewidth = 0.7) +
+  geom_point(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), size = 3) +
+  geom_errorbar(data = nfix_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "N-Fixation rate"), width = 0.8) +
+  scale_color_manual(name = "Nitrogen Process", values = process_colors) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = x_limits) +
+  scale_y_continuous(
+    name = expression("Denitrification rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+    sec.axis = sec_axis(~ (. - a_r) / b_r, name = expression("Anammox & N-Fix rates (nmol N"[2]*" L"^-1*" h"^-1*")"))
+  ) +
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA),
+        axis.line = element_line(color = "black"),
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
+
+## =====================================================================
+##  ENSAMBLAR TODO: franja de fases UNA sola vez por columna, arriba de todo
+## =====================================================================
+strip_row  <- make_phase_strip("Surface") | make_phase_strip("Subsurface")
+rich_row   <- p_rich_surface | p_rich_bottom
+div_row    <- p_div_surface  | p_div_bottom
+rates_row  <- p_rates_surface | p_rates_subsurface
+
+master_fig <- strip_row / rich_row / div_row / rates_row +
+  plot_layout(heights = c(0.06, 1, 1, 1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 13))
+
+master_fig
+```
+
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(patchwork)
+
+## =====================================================================
+##  1) hzo / nirS  (Kai_qPCRs_amx_nirS.xlsx)
+## =====================================================================
+kai_raw <- read_excel("~/Documents/SIC_EFR_PROJECT/genes_data/Kai_qPCRs_amx_nirS.xlsx", sheet = 1)
+
+kai_clean <- kai_raw %>%
+  rename(SampleID = `Sample ID`, hzo = `hzo [copies/mL]`, nirS = `nirs [copies/mL]`, Day = Day) %>%
+  mutate(SampleID = str_trim(SampleID)) %>%
+  filter(!str_detect(SampleID, "^PAC"), !str_detect(SampleID, "^DW")) %>%
+  mutate(
+    Mesocosm = as.numeric(str_extract(SampleID, "(?<=M-)\\d+")),
+    Layer = ifelse(str_detect(SampleID, "Surf"), "Surface", "Subsurface")
+  ) %>%
+  filter(Mesocosm %in% 5:8)
+
+genes_ab <- kai_clean %>%
+  select(Day, Layer, hzo, nirS) %>%
+  pivot_longer(cols = c(hzo, nirS), names_to = "Gene", values_to = "Value") %>%
+  group_by(Day, Layer, Gene) %>%
+  summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+
+## =====================================================================
+##  2) nifH P8 / CR  (Susi_qPCR_data.xlsx, hoja Surf_Bott)
+## =====================================================================
+susi_raw <- read_excel("~/Documents/SIC_EFR_PROJECT/genes_data/Susi_qPCR_data.xlsx", sheet = "Surf_Bott")
+
+measured_days <- c(2, 12, 13, 14, 15, 16, 17, 24, 28, 32, 44, 48)
+
+## columnas tipo "P8 M5 S", "CR M6 B", etc. Extraemos Gene / Mesocosm / Layer del nombre.
+col_info <- tibble(col = names(susi_raw)) %>%
+  filter(str_detect(col, "^(P8|CR) M\\d+ (S|B)\\s*$")) %>%
+  mutate(
+    Gene = str_extract(col, "^(P8|CR)"),
+    Mesocosm = as.numeric(str_extract(col, "(?<=M)\\d+")),
+    Layer = ifelse(str_detect(col, " S\\s*$"), "Surface", "Subsurface")
+  ) %>%
+  filter(Mesocosm %in% 5:8)
+
+nifH_long <- susi_raw %>%
+  filter(day %in% measured_days) %>%
+  select(Day = day, all_of(col_info$col)) %>%
+  pivot_longer(cols = -Day, names_to = "col", values_to = "Value") %>%
+  left_join(col_info, by = "col") %>%
+  select(Day, Layer, Gene, Value)
+
+genes_nifH <- nifH_long %>%
+  group_by(Day, Layer, Gene) %>%
+  summarise(Mean = mean(Value, na.rm = TRUE), SE = sd(Value, na.rm = TRUE) / sqrt(n()), .groups = "drop")
+
+## =====================================================================
+##  FASES (misma definición usada en toda la figura)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I" = "#8C1D40", "Phase II" = "#F2A93B",
+                   "Phase III" = "#AEE1C8", "Phase IV" = "#3D7EB5")
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+make_phase_strip <- function(layer_name) {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    labs(title = layer_name) +
+    theme_void() +
+    theme(legend.position = "none",
+          plot.margin = margin(2, 5.5, 0, 5.5),
+          plot.title = element_text(face = "bold", hjust = 0.5, size = 12))
+}
+
+## =====================================================================
+##  PANEL hzo / nirS -- escala sqrt (permite el 0), un solo eje
+## =====================================================================
+gene_colors_ab <- c("hzo" = "#7B3294", "nirS" = "#E08214")
+
+make_ab_plot <- function(layer_name) {
+  df <- genes_ab %>% filter(Layer == layer_name) %>%
+    mutate(ymin = pmax(Mean - SE, 0), ymax = Mean + SE)
+  all_days <- sort(unique(df$Day))
+
+  ggplot(df, aes(x = Day, y = Mean, color = Gene, group = Gene)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 1) +
+    scale_color_manual(values = gene_colors_ab) +
+    scale_y_continuous(trans = "sqrt", name = "Gene copies (copies/mL)") +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days), limits = x_limits) +
+    labs(x = "Day", color = "Gene") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+    )
+}
+
+p_ab_surface    <- make_ab_plot("Surface")
+p_ab_subsurface <- make_ab_plot("Subsurface")
+
+## =====================================================================
+##  PANEL nifH (P8 / CR) -- escala log10; linea se corta en dias "no detectado"
+## =====================================================================
+gene_colors_nifH <- c("P8" = "#1B9E77", "CR" = "#D95F02")
+
+make_nifH_plot <- function(layer_name) {
+  floor_val <- 1  # piso de deteccion (1 copia L-1): representa "no detectado" en escala log10
+  df <- genes_nifH %>%
+    filter(Layer == layer_name) %>%
+    arrange(Gene, Day) %>%
+    mutate(
+      Mean_plot = pmax(Mean, floor_val),            # los 0 bajan al piso -> el PUNTO se muestra ahi
+      Mean_line = ifelse(Mean == 0, NA, Mean_plot),  # NA en el piso -> la LINEA se corta ahi
+      ymin = pmax(Mean - SE, floor_val),
+      ymax = pmax(Mean + SE, floor_val)
+    )
+  all_days <- sort(unique(genes_nifH$Day))
+
+  ggplot(df, aes(x = Day, color = Gene, group = Gene)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(aes(y = Mean_line), linewidth = 0.7, na.rm = TRUE) +
+    geom_point(aes(y = Mean_plot), size = 3) +
+    geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 1) +
+    scale_color_manual(values = gene_colors_nifH) +
+    scale_y_log10(name = expression(italic("nifH")~"clusters (copies L"^-1*")")) +
+    scale_x_continuous(breaks = all_days, labels = paste0("Day-", all_days), limits = x_limits) +
+    labs(x = "Day", color = "nifH cluster") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+    )
+}
+
+p_nifH_surface    <- make_nifH_plot("Surface")
+p_nifH_subsurface <- make_nifH_plot("Subsurface")
+
+## =====================================================================
+##  ENSAMBLAR: franja de fases (1 vez por columna) + hzo/nirS + nifH
+## =====================================================================
+strip_row <- make_phase_strip("Surface") | make_phase_strip("Subsurface")
+ab_row    <- p_ab_surface   | p_ab_subsurface
+nifH_row  <- p_nifH_surface | p_nifH_subsurface
+
+genes_fig <- strip_row / ab_row / nifH_row +
+  plot_layout(heights = c(0.07, 1, 1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 13))
+
+genes_fig
+```
+# maxima unificacion
+
+
+```{r}
+library(vegan)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(patchwork)
+
+## =====================================================================
+##  1) CARGAR TODOS LOS DATOS
+## =====================================================================
+ipl_data  <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/combined_data_only_IPL.csv",
+                         sep = ",", header = TRUE)
+bac_data  <- read.delim("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/NMDS_mesocosms/merged_data_clean_M5_M6_ORDER_phases.csv",
+                         sep = ",", header = TRUE)
+rates     <- read.delim("~/Documents/SIC_EFR_PROJECT/Sebastian_Data/Rates.csv", sep = ",", header = TRUE,
+                         na.strings = c("NA", "NaN", "NAN", ""))
+rates <- rates %>% mutate(N_Fix = pmax(N_Fix, 0, na.rm = FALSE))
+
+kai_raw  <- read_excel("~/Documents/SIC_EFR_PROJECT/genes_data/Kai_qPCRs_amx_nirS.xlsx", sheet = 1)
+susi_raw <- read_excel("~/Documents/SIC_EFR_PROJECT/genes_data/Susi_qPCR_data.xlsx", sheet = "Surf_Bott")
+
+## =====================================================================
+##  2) FASES (definicion unica, reutilizada por todo)
+## =====================================================================
+phase_df <- data.frame(
+  Phase = factor(c("Phase I", "Phase II", "Phase III", "Phase IV"),
+                 levels = c("Phase I", "Phase II", "Phase III", "Phase IV")),
+  xmin  = c(0.5, 11.5, 19.5, 37.5),
+  xmax  = c(11.5, 19.5, 37.5, 50.5)
+)
+phase_colors <- c("Phase I" = "#8C1D40", "Phase II" = "#F2A93B",
+                   "Phase III" = "#AEE1C8", "Phase IV" = "#3D7EB5")
+phase_vlines <- c(11.5, 19.5, 37.5)
+x_limits <- c(0, 51)
+
+make_phase_strip <- function(layer_name) {
+  ggplot(phase_df) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 1, fill = Phase),
+              color = "white", linewidth = 0.4) +
+    geom_text(aes(x = (xmin + xmax) / 2, y = 0.5, label = Phase),
+              size = 2.6, fontface = "bold", color = "black") +
+    scale_fill_manual(values = phase_colors) +
+    scale_x_continuous(limits = x_limits, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    labs(title = layer_name) +
+    theme_void() +
+    theme(legend.position = "none",
+          plot.margin = margin(2, 5.5, 0, 5.5),
+          plot.title = element_text(face = "bold", hjust = 0.5, size = 12))
+}
+
+## =====================================================================
+##  3) RIQUEZA (Chao1) y DIVERSIDAD (Shannon) - IPL vs 16S
+## =====================================================================
+get_index_summary <- function(df, pattern, id_col, index_fun) {
+  df %>%
+    filter(grepl(pattern, .data[[id_col]])) %>%
+    mutate(Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", .data[[id_col]]))) %>%
+    select(all_of(id_col), Day, where(is.numeric)) %>%
+    rowwise() %>%
+    mutate(Value = index_fun(c_across(where(is.numeric) & !matches("^Day$")))) %>%
+    ungroup() %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+}
+chao1_fun   <- function(x) estimateR(round(x))["S.chao1"]
+shannon_fun <- function(x) diversity(x, index = "shannon")
+
+rich_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  chao1_fun) %>% mutate(DataType = "Lipids (IPL)")
+rich_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+rich_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", chao1_fun) %>% mutate(DataType = "16S rRNA")
+
+div_ipl_surface <- get_index_summary(ipl_data, "^Surface", "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_ipl_bottom  <- get_index_summary(ipl_data, "^Bottom",  "X",  shannon_fun) %>% mutate(DataType = "Lipids (IPL)")
+div_bac_surface <- get_index_summary(bac_data, "^Surface", "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+div_bac_bottom  <- get_index_summary(bac_data, "^Bottom",  "ID", shannon_fun) %>% mutate(DataType = "16S rRNA")
+
+palette_richness  <- c("Lipids (IPL)" = "#4393C3", "16S rRNA" = "#D6604D")
+palette_diversity <- c("Lipids (IPL)" = "#2CA25F", "16S rRNA" = "#88419D")
+
+## =====================================================================
+##  4) TASAS DE NITROGENO
+## =====================================================================
+summarise_rate <- function(df, depth_name, value_col) {
+  df %>%
+    filter(Depth == depth_name, !is.na(.data[[value_col]])) %>%
+    group_by(Day) %>%
+    summarise(Mean = mean(.data[[value_col]]), SE = sd(.data[[value_col]]) / sqrt(n()), .groups = "drop")
+}
+nfix_surface        <- summarise_rate(rates, "Surface",    "N_Fix")
+nfix_subsurface     <- summarise_rate(rates, "Subsurface", "N_Fix")
+denit_subsurface    <- summarise_rate(rates, "Subsurface", "denitri_rate")
+anammox_subsurface  <- summarise_rate(rates, "Subsurface", "anammox_rate")
+
+process_colors <- c("Denitrification rate" = "#D7191C",
+                     "Anammox rate"        = "#2166AC",
+                     "N-Fixation rate"     = "#1B7837")
+
+## =====================================================================
+##  5) hzo / nirS  (M5-M8)
+## =====================================================================
+kai_clean <- kai_raw %>%
+  rename(SampleID = `Sample ID`, hzo = `hzo [copies/mL]`, nirS = `nirs [copies/mL]`, Day = Day) %>%
+  mutate(SampleID = str_trim(SampleID)) %>%
+  filter(!str_detect(SampleID, "^PAC"), !str_detect(SampleID, "^DW")) %>%
+  mutate(
+    Mesocosm = as.numeric(str_extract(SampleID, "(?<=M-)\\d+")),
+    Layer = ifelse(str_detect(SampleID, "Surf"), "Surface", "Subsurface")
+  ) %>%
+  filter(Mesocosm %in% 5:8)
+
+genes_ab <- kai_clean %>%
+  select(Day, Layer, hzo, nirS) %>%
+  pivot_longer(cols = c(hzo, nirS), names_to = "Gene", values_to = "Value") %>%
+  group_by(Day, Layer, Gene) %>%
+  summarise(Mean = mean(Value), SE = sd(Value) / sqrt(n()), .groups = "drop")
+
+gene_colors_ab <- c("hzo" = "#7B3294", "nirS" = "#E08214")
+
+## =====================================================================
+##  6) nifH P8 / CR  (M5-M8)
+## =====================================================================
+measured_days_nifH <- c(2, 12, 13, 14, 15, 16, 17, 24, 28, 32, 44, 48)
+
+col_info <- tibble(col = names(susi_raw)) %>%
+  filter(str_detect(col, "^(P8|CR) M\\d+ (S|B)\\s*$")) %>%
+  mutate(
+    Gene = str_extract(col, "^(P8|CR)"),
+    Mesocosm = as.numeric(str_extract(col, "(?<=M)\\d+")),
+    Layer = ifelse(str_detect(col, " S\\s*$"), "Surface", "Subsurface")
+  ) %>%
+  filter(Mesocosm %in% 5:8)
+
+nifH_long <- susi_raw %>%
+  filter(day %in% measured_days_nifH) %>%
+  select(Day = day, all_of(col_info$col)) %>%
+  pivot_longer(cols = -Day, names_to = "col", values_to = "Value") %>%
+  left_join(col_info, by = "col") %>%
+  select(Day, Layer, Gene, Value)
+
+genes_nifH <- nifH_long %>%
+  group_by(Day, Layer, Gene) %>%
+  summarise(Mean = mean(Value, na.rm = TRUE), SE = sd(Value, na.rm = TRUE) / sqrt(n()), .groups = "drop")
+
+gene_colors_nifH <- c("P8" = "#1B9E77", "CR" = "#D95F02")
+
+## =====================================================================
+##  7) DIAS MAESTROS: union de TODOS los dias de TODOS los datasets.
+##     Se usa como 'breaks' fijo en CADA panel para que todas las filas
+##     queden alineadas en posicion Y etiqueta.
+## =====================================================================
+all_days_master <- sort(unique(c(
+  rich_ipl_surface$Day, rich_ipl_bottom$Day, rich_bac_surface$Day, rich_bac_bottom$Day,
+  nfix_surface$Day, nfix_subsurface$Day, denit_subsurface$Day, anammox_subsurface$Day,
+  genes_ab$Day, genes_nifH$Day
+)))
+
+shared_x_scale <- scale_x_continuous(breaks = all_days_master,
+                                      labels = paste0("Day-", all_days_master),
+                                      limits = x_limits)
+
+## =====================================================================
+##  8) FUNCIONES DE GRAFICO (todas usan shared_x_scale)
+## =====================================================================
+make_dual_plot <- function(ipl_df, bac_df, index_name, colors) {
+  ipl_range <- range(c(ipl_df$Mean - ipl_df$SE, ipl_df$Mean + ipl_df$SE), na.rm = TRUE)
+  bac_range <- range(c(bac_df$Mean - bac_df$SE, bac_df$Mean + bac_df$SE), na.rm = TRUE)
+  b <- diff(ipl_range) / diff(bac_range)
+  a <- ipl_range[1] - b * bac_range[1]
+
+  bac_df_scaled <- bac_df %>% mutate(Mean_s = a + b * Mean, SE_s = b * SE)
+  plot_df <- bind_rows(ipl_df %>% mutate(Mean_s = Mean, SE_s = SE), bac_df_scaled) %>%
+    mutate(DataType = factor(DataType, levels = c("Lipids (IPL)", "16S rRNA")))
+
+  ggplot(plot_df, aes(x = Day, y = Mean_s, color = DataType, group = DataType)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = Mean_s - SE_s, ymax = Mean_s + SE_s), width = 1) +
+    scale_color_manual(values = colors) +
+    scale_y_continuous(
+      name = paste0(index_name, " index (Lipids, IPL)"),
+      sec.axis = sec_axis(~ (. - a) / b, name = paste0(index_name, " index (16S rRNA)"))
+    ) +
+    shared_x_scale +
+    labs(x = "Day", color = "Data type") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.text.y.left = element_text(color = colors[["Lipids (IPL)"]]),
+      axis.title.y.right = element_text(color = colors[["16S rRNA"]]),
+      axis.text.y.right = element_text(color = colors[["16S rRNA"]]),
+      legend.position = "top"
+    )
+}
+
+p_rich_surface <- make_dual_plot(rich_ipl_surface, rich_bac_surface, "Chao1",   palette_richness)
+p_rich_bottom  <- make_dual_plot(rich_ipl_bottom,  rich_bac_bottom,  "Chao1",   palette_richness)
+p_div_surface  <- make_dual_plot(div_ipl_surface,  div_bac_surface,  "Shannon", palette_diversity)
+p_div_bottom   <- make_dual_plot(div_ipl_bottom,   div_bac_bottom,  "Shannon", palette_diversity)
+
+p_rates_surface <- ggplot(nfix_surface, aes(x = Day, y = Mean)) +
+  geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+  geom_line(color = process_colors[["N-Fixation rate"]], linewidth = 0.7) +
+  geom_point(color = process_colors[["N-Fixation rate"]], size = 3) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), color = process_colors[["N-Fixation rate"]], width = 0.8) +
+  shared_x_scale +
+  labs(x = "Day", y = expression("N-Fixation rate (nmol N"[2]*" L"^-1*" h"^-1*")")) +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA),
+        axis.line = element_line(color = "black"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank())
+
+denit_range <- range(c(denit_subsurface$Mean - denit_subsurface$SE, denit_subsurface$Mean + denit_subsurface$SE), na.rm = TRUE)
+other_range <- range(c(anammox_subsurface$Mean - anammox_subsurface$SE, anammox_subsurface$Mean + anammox_subsurface$SE,
+                        nfix_subsurface$Mean - nfix_subsurface$SE, nfix_subsurface$Mean + nfix_subsurface$SE), na.rm = TRUE)
+b_r <- diff(denit_range) / diff(other_range)
+a_r <- denit_range[1] - b_r * other_range[1]
+anammox_s <- anammox_subsurface %>% mutate(Mean_s = a_r + b_r * Mean, SE_s = b_r * SE)
+nfix_s    <- nfix_subsurface    %>% mutate(Mean_s = a_r + b_r * Mean, SE_s = b_r * SE)
+denit_s   <- denit_subsurface   %>% mutate(Mean_s = Mean, SE_s = SE)
+
+p_rates_subsurface <- ggplot() +
+  geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+  geom_line(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), linewidth = 0.7) +
+  geom_point(data = denit_s, aes(x = Day, y = Mean_s, color = "Denitrification rate"), size = 3) +
+  geom_errorbar(data = denit_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "Denitrification rate"), width = 0.8) +
+  geom_line(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), linewidth = 0.7) +
+  geom_point(data = anammox_s, aes(x = Day, y = Mean_s, color = "Anammox rate"), size = 3) +
+  geom_errorbar(data = anammox_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "Anammox rate"), width = 0.8) +
+  geom_line(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), linewidth = 0.7) +
+  geom_point(data = nfix_s, aes(x = Day, y = Mean_s, color = "N-Fixation rate"), size = 3) +
+  geom_errorbar(data = nfix_s, aes(x = Day, ymin = Mean_s - SE_s, ymax = Mean_s + SE_s, color = "N-Fixation rate"), width = 0.8) +
+  scale_color_manual(name = "Nitrogen Process", values = process_colors) +
+  shared_x_scale +
+  scale_y_continuous(
+    name = expression("Denitrification rate (nmol N"[2]*" L"^-1*" h"^-1*")"),
+    sec.axis = sec_axis(~ (. - a_r) / b_r, name = expression("Anammox & N-Fix rates (nmol N"[2]*" L"^-1*" h"^-1*")"))
+  ) +
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA),
+        axis.line = element_line(color = "black"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
+
+make_ab_plot <- function(layer_name) {
+  df <- genes_ab %>% filter(Layer == layer_name) %>%
+    mutate(ymin = pmax(Mean - SE, 0), ymax = Mean + SE)
+
+  ggplot(df, aes(x = Day, y = Mean, color = Gene, group = Gene)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 1) +
+    scale_color_manual(values = gene_colors_ab) +
+    scale_y_continuous(trans = "sqrt", name = "Gene copies (copies/mL)") +
+    shared_x_scale +
+    labs(x = "Day", color = "Gene") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+    )
+}
+p_ab_surface    <- make_ab_plot("Surface")
+p_ab_subsurface <- make_ab_plot("Subsurface")
+
+make_nifH_plot <- function(layer_name) {
+  floor_val <- 1
+  df <- genes_nifH %>%
+    filter(Layer == layer_name) %>%
+    arrange(Gene, Day) %>%
+    mutate(
+      Mean_plot = pmax(Mean, floor_val),
+      Mean_line = ifelse(Mean == 0, NA, Mean_plot),
+      ymin = pmax(Mean - SE, floor_val),
+      ymax = pmax(Mean + SE, floor_val)
+    )
+
+  ggplot(df, aes(x = Day, color = Gene, group = Gene)) +
+    geom_vline(xintercept = phase_vlines, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_line(aes(y = Mean_line), linewidth = 0.7, na.rm = TRUE) +
+    geom_point(aes(y = Mean_plot), size = 3) +
+    geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 1) +
+    scale_color_manual(values = gene_colors_nifH) +
+    scale_y_log10(name = expression(italic("nifH")~"clusters (copies L"^-1*")")) +
+    shared_x_scale +
+    labs(x = "Day", color = "nifH cluster") +
+    theme_minimal() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+    )
+}
+p_nifH_surface    <- make_nifH_plot("Surface")
+p_nifH_subsurface <- make_nifH_plot("Subsurface")
+
+## =====================================================================
+##  9) ENSAMBLAR TODO
+## =====================================================================
+strip_row <- make_phase_strip("Surface") | make_phase_strip("Subsurface")
+rich_row  <- p_rich_surface   | p_rich_bottom
+div_row   <- p_div_surface    | p_div_bottom
+rates_row <- p_rates_surface  | p_rates_subsurface
+ab_row    <- p_ab_surface     | p_ab_subsurface
+nifH_row  <- p_nifH_surface   | p_nifH_subsurface
+
+full_fig <- strip_row / rich_row / div_row / rates_row / ab_row / nifH_row +
+  plot_layout(heights = c(0.04, 1, 1, 1, 1, 1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 13))
+
+full_fig
+```
+

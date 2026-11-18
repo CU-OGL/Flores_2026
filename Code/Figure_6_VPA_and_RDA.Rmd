@@ -1,0 +1,3611 @@
+---
+title: "RDA_final"
+author: "Edgart Flores"
+date: "2025-03-26"
+output: html_document
+---
+
+# Los nutrientes tienen una relacion inversar con la clorofila, el inclemento de la clorofila es debido al incremento de la biomasa fitoplanctonica que consume nutrientes, lo que explica su relacion inversa. El incremento de la clorofila remove CO2 del medio, lo cula hace que el pH incremente, ademas produce oxigeno lo que explica su relacion directa con esta variable.
+
+# ()
+
+#Me pregunto ahora, si será necesario mantener la clorofila, pensando en que nos estamos centrando en las bacterias del ciclo del nitrogeno ?
+#o remover silicato y clorofila.
+
+# Rpta, SI. Debido a que la clorofila podria ser pigmentos de bacterias que hacen fotosintesis (e.g cianobacterias) y los silicoflagelados (bacterias cianoficeas).
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+#                  el siguiente paso es plotear las variables ambientales con todos los IPLs bacterianos 
+#-----------------------------------------------------------------------------------------------------------------------------------   
+
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Asegurarse de tener los datos cargados
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/combined_data_only_IPL_envriomental.csv")
+
+# Separar Surface y Bottom
+datos_surface <- datos_fusionados %>% filter(grepl("Surface", ID))
+datos_bottom  <- datos_fusionados %>% filter(grepl("Bottom", ID))
+```
+
+#Filtrar
+#Surface
+```{r}
+# Identificar columnas de lípidos (asumiendo que van de la 13 en adelante)
+lipid_vars <- 13:ncol(datos_surface)
+
+# Asegurar que las columnas sean numéricas (por si acaso)
+datos_surface[, lipid_vars] <- datos_surface[, lipid_vars] %>% mutate(across(everything(), as.numeric))
+
+# Calcular suma de cada lípido
+suma_lipidos <- colSums(datos_surface[, lipid_vars], na.rm = TRUE)
+
+# Filtrar por las que tienen suma > 50
+lipidos_seleccionados <- names(suma_lipidos[suma_lipidos > 20])
+lipidos_descartados <- names(suma_lipidos[suma_lipidos <= 20])
+
+# Datos filtrados
+datos_surface_filtrados <- bind_cols(
+  datos_surface[, 1:12],                    # Variables de ID + ambientales
+  datos_surface[, lipidos_seleccionados]   # Lípidos seleccionados
+)
+
+# (Opcional) Ver cuántos se quedaron y cuáles se fueron
+cat("Lípidos seleccionados:", length(lipidos_seleccionados), "\n")
+cat("Lípidos descartados:", length(lipidos_descartados), "\n")
+```
+#Bottom
+```{r}
+# Identificar columnas de lípidos en datos_bottom
+lipid_vars_bottom <- 13:ncol(datos_bottom)
+
+# Asegurar que las columnas sean numéricas
+datos_bottom[, lipid_vars_bottom] <- datos_bottom[, lipid_vars_bottom] %>%
+  mutate(across(everything(), as.numeric))
+
+# Calcular la suma de cada lípido
+suma_lipidos_bottom <- colSums(datos_bottom[, lipid_vars_bottom], na.rm = TRUE)
+
+# Filtrar por las que tienen suma > 50
+lipidos_seleccionados_bottom <- names(suma_lipidos_bottom[suma_lipidos_bottom > 20])
+lipidos_descartados_bottom <- names(suma_lipidos_bottom[suma_lipidos_bottom <= 20])
+
+# Datos filtrados
+datos_bottom_filtrados <- bind_cols(
+  datos_bottom[, 1:12],                          # Variables de ID + ambientales
+  datos_bottom[, lipidos_seleccionados_bottom]  # Lípidos seleccionados
+)
+
+# (Opcional) Ver cuántos lípidos se seleccionaron
+cat("Lípidos seleccionados (Bottom):", length(lipidos_seleccionados_bottom), "\n")
+cat("Lípidos descartados (Bottom):", length(lipidos_descartados_bottom), "\n")
+```
+
+# hay que ajustar el scaling 
+
+
+```{r}
+plot_rda_scaled <- function(df, title_label) {
+  env_data <- df[, 3:12]
+  com_data <- df[, 13:ncol(df)]
+
+  # Filtrar filas completas
+  rows_complete <- complete.cases(env_data)
+  env_data_clean <- env_data[rows_complete, ]
+  com_data_clean <- com_data[rows_complete, ]
+  df_clean <- df[rows_complete, ]
+
+  # RDA
+  rda_model <- rda(com_data_clean ~ ., data = env_data_clean)
+
+  # Scores
+  sites_df <- scores(rda_model, display = "sites", scaling = 2)
+  sites_df <- as.data.frame(sites_df)
+  sites_df$ID <- df_clean$ID
+  sites_df$group <- df_clean$typeset
+  colnames(sites_df)[1:2] <- c("RDA1", "RDA2")
+
+  # Variables ambientales
+  env_vectors <- scores(rda_model, display = "bp", scaling = 2)
+  env_df <- data.frame(
+    Variable = rownames(env_vectors),
+    RDA1 = env_vectors[, 1],
+    RDA2 = env_vectors[, 2]
+  )
+
+  # Normalizar las coordenadas ambientales (0 a 1)
+  env_df$RDA1 <- scales::rescale(env_df$RDA1, to = c(0, 1))
+  env_df$RDA2 <- scales::rescale(env_df$RDA2, to = c(0, 1))
+
+  # Normalizar coordenadas de sitios también si quieres compararlo (opcional)
+  sites_df$RDA1 <- scales::rescale(sites_df$RDA1, to = c(0, 1))
+  sites_df$RDA2 <- scales::rescale(sites_df$RDA2, to = c(0, 1))
+
+  # Convex hulls
+  convex_hull_df <- sites_df %>%
+    group_by(group) %>%
+    slice(chull(RDA1, RDA2))
+
+  # Gráfico
+  p <- ggplot() +
+    geom_vline(xintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_hline(yintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_polygon(data = convex_hull_df, 
+                 aes(x = RDA1, y = RDA2, group = group, fill = group), 
+                 alpha = 0.2, color = "gray60") +
+    geom_point(data = sites_df, 
+               aes(x = RDA1, y = RDA2, color = group, shape = group), size = 4) +
+    geom_text_repel(data = sites_df, 
+                    aes(x = RDA1, y = RDA2, label = ID), size = 2.5) +
+    geom_segment(data = env_df, 
+                 aes(x = 0.5, y = 0.5, xend = RDA1, yend = RDA2), 
+                 arrow = arrow(length = unit(0.25, "cm")), color = "darkblue") +
+    geom_text_repel(data = env_df, 
+                    aes(x = RDA1, y = RDA2, label = Variable), 
+                    size = 4, color = "darkblue") +
+    labs(title = title_label, x = "Scaled RDA1", y = "Scaled RDA2") +
+    scale_color_brewer(palette = "Dark2", name = "Phase") +
+    scale_fill_brewer(palette = "Pastel1", name = "Phase") +
+    theme_minimal() +
+    coord_fixed(xlim = c(0, 1), ylim = c(0, 1))
+
+  return(list(plot = p, model = rda_model))
+}
+```
+
+```{r}
+resultado_surface <- plot_rda_scaled(datos_surface_filtrados, "RDA Scaled - Surface")
+resultado_bottom  <- plot_rda_scaled(datos_bottom_filtrados, "RDA Scaled - Subsurface")
+
+# Extraer plots
+resultado_surface$plot
+resultado_bottom$plot
+
+# Extraer modelos
+rda_surface_model <- resultado_surface$model
+rda_bottom_model  <- resultado_bottom$model
+```
+```{r}
+# Surface
+anova(rda_surface_model, permutations = 999)
+anova(rda_surface_model, by = "axis", permutations = 999)
+anova(rda_surface_model, by = "margin", permutations = 999)
+RsquareAdj(rda_surface_model)
+```
+
+```{r}
+vif.cca(rda_surface_model)
+```
+
+
+
+```{r}
+# Subsurface
+anova(rda_bottom_model, permutations = 999)
+anova(rda_bottom_model, by = "axis", permutations = 999)
+anova(rda_bottom_model, by = "margin", permutations = 999)
+RsquareAdj(rda_bottom_model)
+```
+
+
+
+
+
+```{r}
+rda_surface_scaled <- plot_rda_scaled(datos_surface_filtrados, "RDA Scaled - Surface")
+rda_surface_scaled
+```
+
+```{r}
+rda_bottom_scaled <- plot_rda_scaled(datos_bottom_filtrados, "RDA Scaled - Bottom")
+rda_bottom_scaled
+```
+
+```{r}
+plot_rda_scaled <- function(df, title_label) {
+  library(vegan)
+  library(ggplot2)
+  library(dplyr)
+  library(ggrepel)
+  library(scales)
+
+  # Separar variables ambientales y lípidos
+  env_data <- df[, 3:12]
+  com_data <- df[, 13:ncol(df)]
+
+  # Filtrar filas completas
+  rows_complete <- complete.cases(env_data)
+  env_data_clean <- env_data[rows_complete, ]
+  com_data_clean <- com_data[rows_complete, ]
+  df_clean <- df[rows_complete, ]
+
+  # RDA
+  rda_model <- rda(com_data_clean ~ ., data = env_data_clean)
+
+  # Coordenadas de sitios
+  sites_df <- scores(rda_model, display = "sites", scaling = 2)
+  sites_df <- as.data.frame(sites_df)
+  sites_df$ID <- df_clean$ID
+  sites_df$group <- df_clean$typeset
+
+  # 🧹 Simplificar etiquetas
+  sites_df$Label <- gsub(".*Mesocosm ([0-9]+_Day_[0-9]+)", "M\\1", sites_df$ID)
+
+  colnames(sites_df)[1:2] <- c("RDA1", "RDA2")
+
+  # Coordenadas de variables ambientales
+  env_vectors <- scores(rda_model, display = "bp", scaling = 2)
+  env_df <- data.frame(
+    Variable = rownames(env_vectors),
+    RDA1 = env_vectors[, 1],
+    RDA2 = env_vectors[, 2]
+  )
+
+  # 🔄 Normalizar ambos a rango 0–1
+  sites_df$RDA1 <- rescale(sites_df$RDA1, to = c(0, 1))
+  sites_df$RDA2 <- rescale(sites_df$RDA2, to = c(0, 1))
+  env_df$RDA1 <- rescale(env_df$RDA1, to = c(0, 1))
+  env_df$RDA2 <- rescale(env_df$RDA2, to = c(0, 1))
+
+  # Polygonas por grupo
+  convex_hull_df <- sites_df %>%
+    group_by(group) %>%
+    slice(chull(RDA1, RDA2))
+
+  # 🎨 Plot
+  p <- ggplot() +
+    geom_vline(xintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_hline(yintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_polygon(data = convex_hull_df, 
+                 aes(x = RDA1, y = RDA2, group = group, fill = group), 
+                 alpha = 0.2, color = "gray60") +
+    geom_point(data = sites_df, 
+               aes(x = RDA1, y = RDA2, color = group, shape = group), size = 4) +
+    geom_text_repel(data = sites_df, 
+                    aes(x = RDA1, y = RDA2, label = Label), 
+                    size = 2.5,
+                    max.overlaps = Inf) +
+    geom_segment(data = env_df, 
+                 aes(x = 0.5, y = 0.5, xend = RDA1, yend = RDA2), 
+                 arrow = arrow(length = unit(0.25, "cm")), color = "darkblue") +
+    geom_text_repel(data = env_df, 
+                    aes(x = RDA1, y = RDA2, label = Variable), 
+                    size = 4, color = "darkblue") +
+    labs(title = title_label, x = "Scaled RDA1", y = "Scaled RDA2") +
+    scale_color_brewer(palette = "Dark2", name = "Phase") +
+    scale_fill_brewer(palette = "Pastel1", name = "Phase") +
+    theme_minimal() +
+    coord_fixed(xlim = c(0, 1), ylim = c(0, 1))
+
+  return(p)
+}
+```
+
+```{r}
+rda_surface_scaled <- plot_rda_scaled(datos_surface_filtrados, "RDA Scaled - Surface")
+rda_surface_scaled
+
+rda_bottom_scaled <- plot_rda_scaled(datos_bottom_filtrados, "RDA Scaled - Bottom")
+rda_bottom_scaled
+```
+
+```{r}
+plot_rda_scaled <- function(df, title_label) {
+  library(vegan)
+  library(ggplot2)
+  library(dplyr)
+  library(ggrepel)
+  library(scales)
+
+  # Separar variables ambientales y lípidos
+  env_data <- df[, 3:12]
+  com_data <- df[, 13:ncol(df)]
+
+  # Filtrar filas completas
+  rows_complete <- complete.cases(env_data)
+  env_data_clean <- env_data[rows_complete, ]
+  com_data_clean <- com_data[rows_complete, ]
+  df_clean <- df[rows_complete, ]
+
+  # RDA
+  rda_model <- rda(com_data_clean ~ ., data = env_data_clean)
+
+  # Coordenadas de sitios
+  sites_df <- scores(rda_model, display = "sites", scaling = 2)
+  sites_df <- as.data.frame(sites_df)
+  sites_df$ID <- df_clean$ID
+  sites_df$group <- df_clean$typeset
+
+  # Simplificar etiquetas para que quepan mejor
+  sites_df$Label <- gsub(".*Mesocosm ([0-9]+_Day_[0-9]+)", "M\\1", sites_df$ID)
+
+  # Asegurar orden de fases
+  sites_df$group <- factor(sites_df$group, levels = c("Phase1", "Phase2", "Phase3", "Phase4"))
+
+  colnames(sites_df)[1:2] <- c("RDA1", "RDA2")
+
+  # Variables ambientales
+  env_vectors <- scores(rda_model, display = "bp", scaling = 2)
+  env_df <- data.frame(
+    Variable = rownames(env_vectors),
+    RDA1 = env_vectors[, 1],
+    RDA2 = env_vectors[, 2]
+  )
+
+  # Normalizar a 0–1 para visualización
+  sites_df$RDA1 <- rescale(sites_df$RDA1, to = c(0, 1))
+  sites_df$RDA2 <- rescale(sites_df$RDA2, to = c(0, 1))
+  env_df$RDA1 <- rescale(env_df$RDA1, to = c(0, 1))
+  env_df$RDA2 <- rescale(env_df$RDA2, to = c(0, 1))
+
+  # Convex hulls
+  convex_hull_df <- sites_df %>%
+    group_by(group) %>%
+    slice(chull(RDA1, RDA2))
+
+  # Plot
+  p <- ggplot() +
+    geom_vline(xintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_hline(yintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_polygon(data = convex_hull_df, 
+             aes(x = RDA1, y = RDA2, group = group, fill = group, color = group), 
+             alpha = 0.2) +
+    geom_point(data = sites_df, 
+               aes(x = RDA1, y = RDA2, color = group, shape = group), size = 4, stroke = 1) +
+    geom_text_repel(data = sites_df, 
+                    aes(x = RDA1, y = RDA2, label = Label), 
+                    size = 2.5,
+                    max.overlaps = Inf) +
+    geom_segment(data = env_df, 
+                 aes(x = 0.5, y = 0.5, xend = RDA1, yend = RDA2), 
+                 arrow = arrow(length = unit(0.25, "cm")), color = "steelblue") +
+    geom_text_repel(data = env_df, 
+                    aes(x = RDA1, y = RDA2, label = Variable), 
+                    size = 4, color = "steelblue") +
+    labs(title = title_label, x = "Scaled RDA1", y = "Scaled RDA2") +
+    
+    # 🎨 Colores y formas personalizadas por fase
+    scale_color_manual(name = "Phase",
+                       values = c(
+                         "Phase1" = "#99002F",  # burdeos
+                         "Phase2" = "#FDBF6F",  # durazno
+                         "Phase3" = "#A6CEE3",  # celeste
+                         "Phase4" = "#1F78B4"   # azul
+                       )) +
+    scale_fill_manual(name = "Phase",
+                      values = c(
+                        "Phase1" = "#99002F",
+                        "Phase2" = "#FDBF6F",
+                        "Phase3" = "#A6CEE3",
+                        "Phase4" = "#1F78B4"
+                      )) +
+    scale_shape_manual(name = "Phase",
+                       values = c(
+                         "Phase1" = 21,
+                         "Phase2" = 22,
+                         "Phase3" = 23,
+                         "Phase4" = 24
+                       )) +
+    
+    theme_minimal() +
+theme(
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+) +
+coord_fixed(xlim = c(0, 1), ylim = c(0, 1))
+
+   return(list(plot = p, model = rda_model))
+}
+```
+
+```{r}
+rda_surface_final <- plot_rda_scaled(datos_surface_filtrados, "RDA Scaled - Surface")
+rda_surface_final
+
+rda_bottom_final <- plot_rda_scaled(datos_bottom_filtrados, "RDA Scaled - Subsurface")
+rda_bottom_final
+```
+
+```{r}
+library(patchwork)
+
+# Combinar ambos gráficos en una sola figura, uno arriba del otro
+combined_plot <- rda_surface_final / rda_bottom_final
+
+# Mostrar
+combined_plot
+```
+# Sugerencia de Julio (métricas más que descripcion)
+
+
+
+
+
+
+
+
+# sugerencia de Mobeen
+
+```{r}
+# -------------------------------------------------------
+# Renombrar para no pisar los datos de lípidos
+# -------------------------------------------------------
+bac_surface_filtrados <- datos_surface_filtrados
+bac_bottom_filtrados  <- datos_bottom_filtrados
+
+# -------------------------------------------------------
+# Crear ordenes_surface_rel y ordenes_bottom_rel
+# (abundancias relativas de las columnas bacterianas)
+# -------------------------------------------------------
+ordenes_surf_raw <- bac_surface_filtrados[, 13:ncol(bac_surface_filtrados)]
+ordenes_surface_rel <- ordenes_surf_raw / rowSums(ordenes_surf_raw, na.rm = TRUE)
+ordenes_surface_rel <- bind_cols(
+  bac_surface_filtrados[, 1:12],
+  ordenes_surface_rel
+)
+
+ordenes_bot_raw <- bac_bottom_filtrados[, 13:ncol(bac_bottom_filtrados)]
+ordenes_bottom_rel <- ordenes_bot_raw / rowSums(ordenes_bot_raw, na.rm = TRUE)
+ordenes_bottom_rel <- bind_cols(
+  bac_bottom_filtrados[, 1:12],
+  ordenes_bottom_rel
+)
+```
+
+
+```{r}
+# ============================================================
+#  VARIANCE PARTITIONING - CÓDIGO COMPLETO
+#  Lipidoma ~ Ambiente + Comunidad bacteriana
+#  Superficie y Subsuperficie
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(ggforce)   # para geom_circle
+library(ggrepel)
+
+# ------------------------------------------------------------
+# PASO 1: Asignar IDs reales a matrices de comunidad bacteriana
+# (sus rownames originales eran solo números 1,2,3...)
+# ------------------------------------------------------------
+rownames(ordenes_surface_rel) <- datos_surface_filtrados$ID
+rownames(ordenes_bottom_rel)  <- datos_bottom_filtrados$ID
+
+# ------------------------------------------------------------
+# PASO 2: Extraer las tres matrices por profundidad
+# ------------------------------------------------------------
+
+# SUPERFICIE
+env_surf_m <- datos_surface_filtrados[, 3:12]
+lip_surf_m <- datos_surface_filtrados[, 13:ncol(datos_surface_filtrados)]
+bac_surf_m <- ordenes_surface_rel
+
+# SUBSUPERFICIE
+env_bot_m  <- datos_bottom_filtrados[, 3:12]
+lip_bot_m  <- datos_bottom_filtrados[, 13:ncol(datos_bottom_filtrados)]
+bac_bot_m  <- ordenes_bottom_rel
+
+# ------------------------------------------------------------
+# PASO 3: Eliminar columnas no numéricas de bacterias
+# (ID, Mesocosm, Phase, Grupo que estaban al final)
+# ------------------------------------------------------------
+bac_surf_m <- bac_surf_m[, sapply(bac_surf_m, is.numeric)]
+bac_bot_m  <- bac_bot_m[,  sapply(bac_bot_m,  is.numeric)]
+
+# ------------------------------------------------------------
+# PASO 4: Filas completas
+# ------------------------------------------------------------
+rows_surf <- complete.cases(env_surf_m)
+rows_bot  <- complete.cases(env_bot_m)
+
+env_surf_m <- env_surf_m[rows_surf, ]
+lip_surf_m <- lip_surf_m[rows_surf, ]
+bac_surf_m <- bac_surf_m[rows_surf, ]
+
+env_bot_m  <- env_bot_m[rows_bot, ]
+lip_bot_m  <- lip_bot_m[rows_bot, ]
+bac_bot_m  <- bac_bot_m[rows_bot, ]
+
+cat("SUPERFICIE  env/lip/bac:", nrow(env_surf_m), nrow(lip_surf_m), nrow(bac_surf_m), "\n")
+cat("SUBSUPERFICIE env/lip/bac:", nrow(env_bot_m), nrow(lip_bot_m), nrow(bac_bot_m), "\n")
+
+# ------------------------------------------------------------
+# PASO 5: Transformación Hellinger
+# ------------------------------------------------------------
+lip_surf_hell <- decostand(lip_surf_m, method = "hellinger")
+bac_surf_hell <- decostand(bac_surf_m, method = "hellinger")
+lip_bot_hell  <- decostand(lip_bot_m,  method = "hellinger")
+bac_bot_hell  <- decostand(bac_bot_m,  method = "hellinger")
+
+# ------------------------------------------------------------
+# PASO 6: Reducir bacterias a ejes PCoA
+# (necesario para evitar overfitting: más variables que muestras)
+# Superficie: k=4 ejes, Subsuperficie: k=2 ejes
+# ------------------------------------------------------------
+
+# SUPERFICIE
+pcoa_surf    <- cmdscale(vegdist(bac_surf_m, method = "bray"), k = 4, eig = TRUE)
+bac_surf_pcoa <- as.data.frame(pcoa_surf$points)
+colnames(bac_surf_pcoa) <- paste0("PCoA", 1:4)
+
+var_surf <- round(pcoa_surf$eig / sum(pcoa_surf$eig[pcoa_surf$eig > 0]) * 100, 1)
+cat("Varianza PCoA superficie (4 ejes):", sum(var_surf[1:4]), "%\n")
+
+# SUBSUPERFICIE: k=2 + selección forward de variables ambientales
+pcoa_bot     <- cmdscale(vegdist(bac_bot_m, method = "bray"), k = 2, eig = TRUE)
+bac_bot_pcoa2 <- as.data.frame(pcoa_bot$points)
+colnames(bac_bot_pcoa2) <- c("PCoA1", "PCoA2")
+
+var_bot <- round(pcoa_bot$eig / sum(pcoa_bot$eig[pcoa_bot$eig > 0]) * 100, 1)
+cat("Varianza PCoA subsuperficie (2 ejes):", sum(var_bot[1:2]), "%\n")
+
+# Selección forward de variables ambientales para subsuperficie
+# (con 15 muestras no podemos usar las 10 variables)
+set.seed(123)
+rda_full_bot <- rda(lip_bot_hell ~ ., data = env_bot_m)
+rda_null_bot <- rda(lip_bot_hell ~ 1, data = env_bot_m)
+fwd_bot      <- ordiR2step(rda_null_bot,
+                            scope = formula(rda_full_bot),
+                            direction = "forward",
+                            permutations = 999)
+
+env_bot_sel <- env_bot_m[, attr(fwd_bot$terms, "term.labels")]
+cat("Variables ambientales seleccionadas (subsuperficie):", 
+    colnames(env_bot_sel), "\n")
+
+# ------------------------------------------------------------
+# PASO 7: Variance partitioning
+# ------------------------------------------------------------
+vp_surf <- varpart(lip_surf_hell, env_surf_m,  bac_surf_pcoa)
+vp_bot  <- varpart(lip_bot_hell,  env_bot_sel, bac_bot_pcoa2)
+
+print(vp_surf)
+print(vp_bot)
+
+# ------------------------------------------------------------
+# PASO 8: Tests de significancia (fracciones [a] y [c])
+# rda(Y, Predictores, Covariable_a_controlar)
+# ------------------------------------------------------------
+cat("\n========== SUPERFICIE ==========\n")
+cat("[a] Solo ambiente | controlando comunidad:\n")
+anova_a_surf <- anova(rda(lip_surf_hell, env_surf_m, bac_surf_pcoa), permutations = 999)
+print(anova_a_surf)
+
+cat("[c] Solo comunidad | controlando ambiente:\n")
+anova_c_surf <- anova(rda(lip_surf_hell, bac_surf_pcoa, env_surf_m), permutations = 999)
+print(anova_c_surf)
+
+cat("\n========== SUBSUPERFICIE ==========\n")
+cat("[a] Solo ambiente | controlando comunidad:\n")
+anova_a_bot <- anova(rda(lip_bot_hell, env_bot_sel, bac_bot_pcoa2), permutations = 999)
+print(anova_a_bot)
+
+cat("[c] Solo comunidad | controlando ambiente:\n")
+anova_c_bot <- anova(rda(lip_bot_hell, bac_bot_pcoa2, env_bot_sel), permutations = 999)
+print(anova_c_bot)
+
+# ------------------------------------------------------------
+# PASO 9: Figura con ggplot2
+# ------------------------------------------------------------
+
+# --- Datos para el plot ---
+# Extraer R2 ajustados de varpart
+fracs_surf <- data.frame(
+  depth    = "Surface",
+  fraction = c("[a]\nAmb. only", "[b]\nShared", "[c]\nComm. only", "[d]\nResidual"),
+  value    = c(
+    vp_surf$part$indfract$Adj.R.squared[1],  # [a]
+    vp_surf$part$indfract$Adj.R.squared[2],  # [b]
+    vp_surf$part$indfract$Adj.R.squared[3],  # [c]
+    vp_surf$part$indfract$Adj.R.squared[4]   # [d]
+  ),
+  pval = c(
+    anova_a_surf$`Pr(>F)`[1],   # [a]
+    NA,                          # [b] no testeable
+    anova_c_surf$`Pr(>F)`[1],   # [c]
+    NA                           # [d]
+  )
+)
+
+fracs_bot <- data.frame(
+  depth    = "Subsurface",
+  fraction = c("[a]\nAmb. only", "[b]\nShared", "[c]\nComm. only", "[d]\nResidual"),
+  value    = c(
+    vp_bot$part$indfract$Adj.R.squared[1],
+    vp_bot$part$indfract$Adj.R.squared[2],
+    vp_bot$part$indfract$Adj.R.squared[3],
+    vp_bot$part$indfract$Adj.R.squared[4]
+  ),
+  pval = c(
+    anova_a_bot$`Pr(>F)`[1],
+    NA,
+    anova_c_bot$`Pr(>F)`[1],
+    NA
+  )
+)
+
+fracs_all <- bind_rows(fracs_surf, fracs_bot) %>%
+  mutate(
+    depth    = factor(depth, levels = c("Surface", "Subsurface")),
+    fraction = factor(fraction, levels = c("[a]\nAmb. only", "[b]\nShared", 
+                                           "[c]\nComm. only", "[d]\nResidual")),
+    # Etiqueta de significancia
+    sig_label = case_when(
+      is.na(pval)   ~ "",
+      pval <= 0.001 ~ "***",
+      pval <= 0.01  ~ "**",
+      pval <= 0.05  ~ "*",
+      TRUE          ~ "ns"
+    ),
+    # Colores por fracción
+    fill_color = case_when(
+      fraction == "[a]\nAmb. only"   ~ "#378ADD",
+      fraction == "[b]\nShared"      ~ "#EF9F27",
+      fraction == "[c]\nComm. only"  ~ "#1D9E75",
+      fraction == "[d]\nResidual"    ~ "#888780"
+    ),
+    # Valor para mostrar en barra (negativos → 0 para visualización)
+    value_plot = pmax(value, 0)
+  )
+
+# --- Plot de barras apiladas ---
+p_varpart <- ggplot(fracs_all, aes(x = depth, y = value_plot, fill = fraction)) +
+  geom_col(width = 0.6, color = "white", linewidth = 0.4) +
+  geom_text(
+    aes(label = paste0(round(value_plot * 100, 1), "%\n", sig_label)),
+    position = position_stack(vjust = 0.5),
+    size = 3.2, color = "white", fontface = "bold", lineheight = 0.9
+  ) +
+  scale_fill_manual(
+    name = "Fraction",
+    values = c(
+      "[a]\nAmb. only"  = "#378ADD",
+      "[b]\nShared"     = "#EF9F27",
+      "[c]\nComm. only" = "#1D9E75",
+      "[d]\nResidual"   = "#888780"
+    ),
+    labels = c(
+      "[a]\nAmb. only"  = "[a] Unique environment",
+      "[b]\nShared"     = "[b] Shared",
+      "[c]\nComm. only" = "[c] Unique community",
+      "[d]\nResidual"   = "[d] Residual"
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title    = "Variance partitioning of lipidome",
+    subtitle = "Environment vs. bacterial community structure",
+    x        = NULL,
+    y        = "Adjusted R²"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.border      = element_rect(color = "black", fill = NA, linewidth = 0.5),
+    panel.grid.major.x = element_blank(),
+    legend.position   = "right",
+    plot.title        = element_text(size = 13, face = "bold"),
+    plot.subtitle     = element_text(size = 10, color = "grey40"),
+    axis.text.x       = element_text(size = 12, face = "bold")
+  )
+
+p_varpart
+
+# --- Guardar ---
+#ggsave("varpart_lipidome.pdf", p_varpart, width = 6, height = 5)
+#ggsave("varpart_lipidome.png", p_varpart, width = 6, height = 5, dpi = 300)
+
+#cat("\nFigura guardada como varpart_lipidome.pdf y varpart_lipidome.png\n")
+```
+
+# Interpretación
+La figura muestra que el lipidoma es controlado por dos procesos simultáneos:
+[c] Comunidad > [a] Ambiente en ambas profundidades significa que el turnover taxonómico (quién está presente) explica más varianza única que el ambiente solo. Esto valida la preocupación del revisor — pero no elimina el remodeling, lo contextualiza.
+La fracción [b] compartida es grande en superficie (33.5%), lo que refleja que en este experimento ambiente y comunidad están altamente acoplados — cuando el ambiente cambia, la comunidad también cambia, y es difícil separar ambos efectos completamente. Eso es ecológicamente esperado en un mesocosmo.
+El residual alto en subsuperficie (43%) sugiere que hay variables no medidas que controlan el lipidoma en esa capa — posiblemente gradientes de oxígeno más finos, o interacciones entre organismos.
+En una frase para el paper: "Both environmental conditions and community turnover independently and significantly explained lipidome variability, with community structure accounting for a larger unique fraction, suggesting that lipidome dynamics reflect a combination of physiological remodeling and taxonomic succession."
+
+
+```{r}
+library(eulerr)
+library(grid)
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+sig <- function(p) {
+  if (p <= 0.001) "***"
+  else if (p <= 0.01) "**"
+  else if (p <= 0.05) "*"
+  else "ns"
+}
+
+f_a_surf <- round(anova_a_surf[1, "F"], 2)
+p_a_surf <- anova_a_surf[1, "Pr(>F)"]
+f_c_surf <- round(anova_c_surf[1, "F"], 2)
+p_c_surf <- anova_c_surf[1, "Pr(>F)"]
+f_a_bot  <- round(anova_a_bot[1, "F"], 2)
+p_a_bot  <- anova_a_bot[1, "Pr(>F)"]
+f_c_bot  <- round(anova_c_bot[1, "F"], 2)
+p_c_bot  <- anova_c_bot[1, "Pr(>F)"]
+
+fit_surf <- euler(c(
+  "Environment"           = 0.143,
+  "Community"             = 0.383,
+  "Environment&Community" = 0.335
+))
+
+fit_bot <- euler(c(
+  "Environment"           = 0.102,
+  "Community"             = 0.297,
+  "Environment&Community" = 0.171
+))
+
+# ------------------------------------------------------------
+# Seleccionar TODO el bloque y Cmd+Enter de una vez
+# ------------------------------------------------------------
+{
+  grid.newpage()
+  
+  # Dividir página en 2 filas
+  pushViewport(viewport(layout = grid.layout(
+    nrow = 2, ncol = 1,
+    heights = unit(c(1, 1), "null")
+  )))
+  
+  # --- SUPERFICIE ---
+  pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+  print(plot(fit_surf,
+       fills     = list(fill = c(col_amb, col_com), alpha = 0.45),
+       edges     = list(col  = c(col_amb, col_com), lwd = 2),
+       labels    = list(labels = c("Environment", "Community"),
+                        font = 2, cex = 0.95),
+       quantities = list(
+         labels = c(
+           paste0("14.3%\nF=", f_a_surf, " ", sig(p_a_surf)),
+           paste0("38.3%\nF=", f_c_surf, " ", sig(p_c_surf)),
+           "33.5%"
+         ), font = 1, cex = 0.82),
+       main = "Surface"),
+  newpage = FALSE)
+  grid.text("[d] Residual = 13.9%  |  Total explained = 86.1%",
+            x = 0.5, y = 0.04,
+            gp = gpar(col = "grey40", cex = 0.72))
+  popViewport()
+  
+  # --- SUBSUPERFICIE ---
+  pushViewport(viewport(layout.pos.row = 2, layout.pos.col = 1))
+  print(plot(fit_bot,
+       fills     = list(fill = c(col_amb, col_com), alpha = 0.45),
+       edges     = list(col  = c(col_amb, col_com), lwd = 2),
+       labels    = list(labels = c("Environment", "Community"),
+                        font = 2, cex = 0.95),
+       quantities = list(
+         labels = c(
+           paste0("10.2%\nF=", f_a_bot, " ", sig(p_a_bot)),
+           paste0("29.7%\nF=", f_c_bot, " ", sig(p_c_bot)),
+           "17.1%"
+         ), font = 1, cex = 0.82),
+       main = "Subsurface"),
+  newpage = FALSE)
+  grid.text("[d] Residual = 43.0%  |  Total explained = 57.0%",
+            x = 0.5, y = 0.04,
+            gp = gpar(col = "grey40", cex = 0.72))
+  popViewport()
+}
+```
+
+
+
+
+#Ahora por Phases
+
+
+```{r}
+# ============================================================
+#  VARIANCE PARTITIONING POR FASES
+#  Phase I (1-11) | Phase II (12-19) | Phase III (20-37) | Phase IV (38-50)
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(eulerr)
+library(grid)
+
+# ------------------------------------------------------------
+# FUNCIÓN PRINCIPAL
+# ------------------------------------------------------------
+run_varpart_phase <- function(phase_name, lip_data, bac_data) {
+  
+  cat("\n", rep("=", 50), "\n")
+  cat("  FASE:", phase_name, "\n")
+  cat(rep("=", 50), "\n")
+  
+  # --- 1. Filtrar por fase ---
+  idx_lip <- lip_data$typeset == phase_name
+  idx_bac <- bac_data$typeset == phase_name
+  lip_ph  <- lip_data[idx_lip, ]
+  bac_ph  <- bac_data[idx_bac, ]
+  
+  # --- 2. Match por ID ---
+  ids_comunes <- intersect(lip_ph$ID, bac_ph$ID)
+  if (length(ids_comunes) < 5) {
+    cat("⚠ Menos de 5 muestras comunes, saltando\n")
+    return(NULL)
+  }
+  cat("Muestras comunes:", length(ids_comunes), "\n")
+  
+  lip_ph <- lip_ph[match(ids_comunes, lip_ph$ID), ]
+  bac_ph <- bac_ph[match(ids_comunes, bac_ph$ID), ]
+  
+  # --- 3. Matrices ---
+  env_m <- lip_ph[, 3:12]
+  lip_m <- lip_ph[, 13:ncol(lip_ph)]
+  bac_m <- bac_ph[, sapply(bac_ph, is.numeric)]
+  
+  rows_ok <- complete.cases(env_m)
+  env_m   <- env_m[rows_ok, ]
+  lip_m   <- lip_m[rows_ok, ]
+  bac_m   <- bac_m[rows_ok, ]
+  n <- nrow(env_m)
+  cat("Muestras tras NAs:", n, "\n")
+  if (n < 5) { cat("⚠ Muy pocas muestras\n"); return(NULL) }
+  
+  # --- 4. Hellinger ---
+  lip_hell <- decostand(lip_m, method = "hellinger")
+  
+  # --- 5. NOVEDAD: Reducir ambiente a ejes PCA ---
+  # Con n pequeño usamos máximo 2 ejes PCA ambientales
+  k_env <- min(2, n - 2)
+  env_scaled <- scale(env_m)
+  # Eliminar columnas con varianza 0 o NA
+  env_scaled <- env_scaled[, apply(env_scaled, 2, function(x) !any(is.na(x)) && var(x) > 0)]
+  pca_env    <- prcomp(env_scaled, center = FALSE, scale. = FALSE)
+  env_pca    <- as.data.frame(pca_env$x[, 1:k_env])
+  colnames(env_pca) <- paste0("EnvPC", 1:k_env)
+  
+  var_env <- round(summary(pca_env)$importance[2, 1:k_env] * 100, 1)
+  cat("Ejes PCA ambiente usados:", k_env,
+      "| Varianza:", paste(var_env, collapse = " + "), "%\n")
+  
+  # --- 6. Reducir bacterias a ejes PCoA ---
+  k_bac <- min(2, n - 2)
+  pcoa_res <- cmdscale(vegdist(bac_m, method = "bray"), k = k_bac, eig = TRUE)
+  bac_pcoa <- as.data.frame(pcoa_res$points)
+  colnames(bac_pcoa) <- paste0("PCoA", 1:k_bac)
+  
+  var_bac <- round(pcoa_res$eig / sum(pcoa_res$eig[pcoa_res$eig > 0]) * 100, 1)
+  cat("Ejes PCoA bacterias usados:", k_bac,
+      "| Varianza:", sum(var_bac[1:k_bac]), "%\n")
+  
+  # --- 7. Variance partitioning ---
+  vp <- tryCatch(
+    varpart(lip_hell, env_pca, bac_pcoa),
+    error = function(e) { cat("⚠ varpart falló:", e$message, "\n"); NULL }
+  )
+  if (is.null(vp)) return(NULL)
+  
+  # --- 8. Tests de significancia ---
+  anova_a <- tryCatch(
+    anova(rda(lip_hell, env_pca, bac_pcoa), permutations = 999),
+    error = function(e) NULL
+  )
+  anova_c <- tryCatch(
+    anova(rda(lip_hell, bac_pcoa, env_pca), permutations = 999),
+    error = function(e) NULL
+  )
+  
+  # --- 9. Resultados ---
+  a_val <- vp$part$indfract$Adj.R.squared[1]
+  b_val <- vp$part$indfract$Adj.R.squared[2]
+  c_val <- vp$part$indfract$Adj.R.squared[3]
+  d_val <- vp$part$indfract$Adj.R.squared[4]
+  p_a   <- if (!is.null(anova_a)) anova_a$`Pr(>F)`[1] else NA
+  p_c   <- if (!is.null(anova_c)) anova_c$`Pr(>F)`[1] else NA
+  
+  cat(sprintf("[a] Ambiente único:  %.1f%%  (p=%.3f)\n", a_val*100, ifelse(is.na(p_a), NaN, p_a)))
+  cat(sprintf("[b] Compartido:      %.1f%%\n",            b_val*100))
+  cat(sprintf("[c] Comunidad única: %.1f%%  (p=%.3f)\n", c_val*100, ifelse(is.na(p_c), NaN, p_c)))
+  cat(sprintf("[d] Residual:        %.1f%%\n",            d_val*100))
+  
+  list(phase=phase_name, a=a_val, b=b_val, c=c_val, d=d_val,
+       p_a=p_a, p_c=p_c, vp=vp, anova_a=anova_a, anova_c=anova_c)
+}
+
+# --- Correr ---
+fases <- c("Phase1", "Phase2", "Phase3", "Phase4")
+
+results_surf <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_surface_filtrados, ordenes_surface_rel))
+names(results_surf) <- fases
+
+results_bot <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_bottom_filtrados, ordenes_bottom_rel))
+names(results_bot) <- fases
+```
+
+
+
+```{r}
+# ============================================================
+#  FIGURA EULER - 4 FASES × 2 PROFUNDIDADES
+# ============================================================
+
+sig <- function(p) {
+  if (is.na(p))    return("")
+  if (p <= 0.001)  return("***")
+  if (p <= 0.01)   return("**")
+  if (p <= 0.05)   return("*")
+  return("ns")
+}
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+phase_labels <- c(
+  "Phase1" = "Phase I (Days 1-11)",
+  "Phase2" = "Phase II (Days 12-19)",
+  "Phase3" = "Phase III (Days 20-37)",
+  "Phase4" = "Phase IV (Days 38-50)"
+)
+
+plot_euler_phase <- function(res, depth_label) {
+  if (is.null(res)) {
+    grid.text("Insufficient data", gp = gpar(col = "grey50", cex = 0.9))
+    return(invisible(NULL))
+  }
+  
+  # Valores positivos para euler (no acepta negativos)
+  a_plot <- max(res$a, 0)
+  b_plot <- max(res$b, 0)
+  c_plot <- max(res$c, 0)
+  
+  fit <- tryCatch(
+    euler(c(
+      "Environment"           = a_plot,
+      "Community"             = c_plot,
+      "Environment&Community" = b_plot
+    )),
+    error = function(e) NULL
+  )
+  
+  if (is.null(fit)) {
+    grid.text("Could not fit Euler", gp = gpar(col = "grey50", cex = 0.8))
+    return(invisible(NULL))
+  }
+  
+  f_a <- if (!is.null(res$anova_a)) round(res$anova_a[1, "F"], 2) else NA
+  f_c <- if (!is.null(res$anova_c)) round(res$anova_c[1, "F"], 2) else NA
+  
+  label_a <- paste0(round(a_plot*100, 1), "%",
+                    if (!is.na(f_a)) paste0("\nF=", f_a, " ", sig(res$p_a)) else "")
+  label_c <- paste0(round(c_plot*100, 1), "%",
+                    if (!is.na(f_c)) paste0("\nF=", f_c, " ", sig(res$p_c)) else "")
+  label_b <- paste0(round(b_plot*100, 1), "%")
+  
+  print(plot(fit,
+       fills     = list(fill = c(col_amb, col_com), alpha = 0.45),
+       edges     = list(col  = c(col_amb, col_com), lwd = 2),
+       labels    = list(labels = c("Environment", "Community"), font = 2, cex = 0.85),
+       quantities = list(labels = c(label_a, label_c, label_b), font = 1, cex = 0.78),
+       main = paste0(depth_label, "\n", phase_labels[res$phase])),
+  newpage = FALSE)
+  
+  grid.text(
+    paste0("[d] Residual = ", round(res$d*100, 1), "%"),
+    x = 0.5, y = 0.04,
+    gp = gpar(col = "grey40", cex = 0.70)
+  )
+}
+
+# --- Dibujar figura: 2 columnas (Surface | Subsurface) × 4 filas (fases) ---
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(nrow = 4, ncol = 2)))
+
+for (i in 1:4) {
+  ph <- fases[i]
+  
+  # Superficie
+  pushViewport(viewport(layout.pos.row = i, layout.pos.col = 1))
+  plot_euler_phase(results_surf[[ph]], "Surface")
+  popViewport()
+  
+  # Subsuperficie
+  pushViewport(viewport(layout.pos.row = i, layout.pos.col = 2))
+  plot_euler_phase(results_bot[[ph]], "Subsurface")
+  popViewport()
+}
+```
+
+# bajando el umbral por baja cantidad de datos
+
+```{r}
+# ============================================================
+#  VARIANCE PARTITIONING POR FASES - VERSIÓN FINAL
+#  Adaptada para muestras pequeñas (n >= 4)
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(eulerr)
+library(grid)
+
+# ------------------------------------------------------------
+# FUNCIÓN PRINCIPAL
+# ------------------------------------------------------------
+run_varpart_phase <- function(phase_name, lip_data, bac_data) {
+  
+  cat("\n", rep("=", 50), "\n")
+  cat("  FASE:", phase_name, "\n")
+  cat(rep("=", 50), "\n")
+  
+  # --- 1. Filtrar por fase ---
+  idx_lip <- lip_data$typeset == phase_name
+  idx_bac <- bac_data$typeset == phase_name
+  lip_ph  <- lip_data[idx_lip, ]
+  bac_ph  <- bac_data[idx_bac, ]
+  
+  cat("Muestras lípidos:", sum(idx_lip),
+      "| Muestras bacterias:", sum(idx_bac), "\n")
+  
+  # --- 2. Match por ID ---
+  ids_comunes <- intersect(lip_ph$ID, bac_ph$ID)
+  
+  if (length(ids_comunes) < 4) {
+    cat("⚠ Menos de 4 muestras comunes, saltando fase", phase_name, "\n")
+    return(NULL)
+  }
+  cat("Muestras comunes:", length(ids_comunes), "\n")
+  
+  lip_ph <- lip_ph[match(ids_comunes, lip_ph$ID), ]
+  bac_ph <- bac_ph[match(ids_comunes, bac_ph$ID), ]
+  
+  # --- 3. Matrices ---
+  env_m <- lip_ph[, 3:12]
+  lip_m <- lip_ph[, 13:ncol(lip_ph)]
+  bac_m <- bac_ph[, sapply(bac_ph, is.numeric)]
+  
+  rows_ok <- complete.cases(env_m)
+  env_m   <- env_m[rows_ok, ]
+  lip_m   <- lip_m[rows_ok, ]
+  bac_m   <- bac_m[rows_ok, ]
+  n <- nrow(env_m)
+  
+  cat("Muestras tras eliminar NAs:", n, "\n")
+  
+  if (n < 4) {
+    cat("⚠ Muy pocas muestras completas, saltando\n")
+    return(NULL)
+  }
+  
+  # --- 4. Hellinger ---
+  lip_hell <- decostand(lip_m, method = "hellinger")
+  
+  # --- 5. Reducir ambiente a ejes PCA ---
+  # n <= 6  → k=1 eje
+  # n >= 7  → k=2 ejes
+  # nunca más de n-2 predictores totales
+  k_env <- ifelse(n <= 6, 1, 2)
+  k_bac <- ifelse(n <= 6, 1, 2)
+  
+  # Verificar que k_env + k_bac < n (regla de oro para RDA)
+  while ((k_env + k_bac) >= (n - 1) && k_env > 0) {
+    k_env <- k_env - 1
+  }
+  
+  cat("k ambiente:", k_env, "| k bacterias:", k_bac,
+      "| Total predictores:", k_env + k_bac, "| n:", n, "\n")
+  
+  # PCA ambiente
+  env_scaled <- scale(env_m)
+  # Eliminar columnas con NA o varianza 0 tras escalar
+  cols_ok    <- apply(env_scaled, 2, function(x) !any(is.na(x)) && var(x) > 0)
+  env_scaled <- env_scaled[, cols_ok]
+  
+  pca_env <- prcomp(env_scaled, center = FALSE, scale. = FALSE)
+  env_pca <- as.data.frame(pca_env$x[, 1:k_env, drop = FALSE])
+  colnames(env_pca) <- paste0("EnvPC", 1:k_env)
+  
+  var_env <- round(summary(pca_env)$importance[2, 1:k_env] * 100, 1)
+  cat("Varianza PCA ambiente:", paste(var_env, collapse = " + "), "%\n")
+  
+  # PCoA bacterias
+  pcoa_res <- cmdscale(vegdist(bac_m, method = "bray"), k = k_bac, eig = TRUE)
+  bac_pcoa <- as.data.frame(pcoa_res$points[, 1:k_bac, drop = FALSE])
+  colnames(bac_pcoa) <- paste0("PCoA", 1:k_bac)
+  
+  var_bac <- round(pcoa_res$eig / sum(pcoa_res$eig[pcoa_res$eig > 0]) * 100, 1)
+  cat("Varianza PCoA bacterias:", sum(var_bac[1:k_bac]), "%\n")
+  
+  # --- 6. Variance partitioning ---
+  vp <- tryCatch(
+    varpart(lip_hell, env_pca, bac_pcoa),
+    error = function(e) {
+      cat("⚠ varpart falló:", e$message, "\n")
+      NULL
+    }
+  )
+  if (is.null(vp)) return(NULL)
+  
+  # --- 7. Tests de significancia ---
+  anova_a <- tryCatch(
+    anova(rda(lip_hell, env_pca, bac_pcoa), permutations = 999),
+    error = function(e) NULL
+  )
+  anova_c <- tryCatch(
+    anova(rda(lip_hell, bac_pcoa, env_pca), permutations = 999),
+    error = function(e) NULL
+  )
+  
+  # --- 8. Extraer fracciones ---
+  a_val <- vp$part$indfract$Adj.R.squared[1]
+  b_val <- vp$part$indfract$Adj.R.squared[2]
+  c_val <- vp$part$indfract$Adj.R.squared[3]
+  d_val <- vp$part$indfract$Adj.R.squared[4]
+  p_a   <- if (!is.null(anova_a)) anova_a$`Pr(>F)`[1] else NA
+  p_c   <- if (!is.null(anova_c)) anova_c$`Pr(>F)`[1] else NA
+  
+  cat(sprintf("[a] Ambiente único:  %.1f%%  (p=%.3f)\n", a_val*100, ifelse(is.na(p_a), NaN, p_a)))
+  cat(sprintf("[b] Compartido:      %.1f%%\n",            b_val*100))
+  cat(sprintf("[c] Comunidad única: %.1f%%  (p=%.3f)\n", c_val*100, ifelse(is.na(p_c), NaN, p_c)))
+  cat(sprintf("[d] Residual:        %.1f%%\n",            d_val*100))
+  
+  list(
+    phase   = phase_name,
+    n       = n,
+    k_env   = k_env,
+    k_bac   = k_bac,
+    a = a_val, b = b_val, c = c_val, d = d_val,
+    p_a = p_a, p_c = p_c,
+    vp  = vp,
+    anova_a = anova_a,
+    anova_c = anova_c
+  )
+}
+
+# ============================================================
+#  CORRER PARA SUPERFICIE Y SUBSUPERFICIE
+# ============================================================
+
+fases <- c("Phase1", "Phase2", "Phase3", "Phase4")
+
+results_surf <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_surface_filtrados, ordenes_surface_rel))
+names(results_surf) <- fases
+
+results_bot <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_bottom_filtrados, ordenes_bottom_rel))
+names(results_bot) <- fases
+
+# ============================================================
+#  FIGURA EULER - 4 FASES × 2 PROFUNDIDADES
+# ============================================================
+
+# ============================================================
+#  FIGURA EULER COMPLETA - 4 FASES × 2 PROFUNDIDADES
+# ============================================================
+
+sig <- function(p) {
+  if (is.na(p))   return("")
+  if (p <= 0.001) return("***")
+  if (p <= 0.01)  return("**")
+  if (p <= 0.05)  return("*")
+  return("ns")
+}
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+phase_labels <- c(
+  "Phase1" = "Phase I (Days 1-11)",
+  "Phase2" = "Phase II (Days 12-19)",
+  "Phase3" = "Phase III (Days 20-37)",
+  "Phase4" = "Phase IV (Days 38-50)"
+)
+
+plot_euler_phase <- function(res, depth_label) {
+  
+  if (is.null(res)) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("Insufficient data\n(n < 4)",
+              gp = gpar(col = "grey50", cex = 0.85))
+    return(invisible(NULL))
+  }
+  
+  a_plot <- max(res$a, 0)
+  b_plot <- max(res$b, 0)
+  c_plot <- max(res$c, 0)
+  
+  if ((a_plot + b_plot + c_plot) == 0) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("All fractions ≤ 0",
+              gp = gpar(col = "grey50", cex = 0.85))
+    return(invisible(NULL))
+  }
+  
+  fit <- tryCatch(
+    euler(c(
+      "Environment"           = a_plot,
+      "Community"             = c_plot,
+      "Environment&Community" = b_plot
+    )),
+    error = function(e) NULL
+  )
+  
+  if (is.null(fit)) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("Could not fit Euler",
+              gp = gpar(col = "grey50", cex = 0.8))
+    return(invisible(NULL))
+  }
+  
+  f_a <- if (!is.null(res$anova_a)) round(res$anova_a[1, "F"], 2) else NA
+  f_c <- if (!is.null(res$anova_c)) round(res$anova_c[1, "F"], 2) else NA
+  
+  label_a <- paste0(round(a_plot*100, 1), "%",
+                    if (!is.na(f_a)) paste0("\nF=", f_a, " ", sig(res$p_a)) else "")
+  label_c <- paste0(round(c_plot*100, 1), "%",
+                    if (!is.na(f_c)) paste0("\nF=", f_c, " ", sig(res$p_c)) else "")
+  label_b <- paste0(round(b_plot*100, 1), "%")
+  
+  # Título corto para evitar solapamiento
+  main_title <- paste0(phase_labels[res$phase], " (n=", res$n, ")")
+  
+  print(
+    plot(fit,
+         fills      = list(fill = c(col_amb, col_com), alpha = 0.45),
+         edges      = list(col  = c(col_amb, col_com), lwd = 2),
+         labels     = list(labels = c("Environment", "Community"),
+                           font = 2, cex = 0.80),
+         quantities = list(labels = c(label_a, label_c, label_b),
+                           font = 1, cex = 0.75),
+         main = list(label = main_title, cex = 0.85)),
+    newpage = FALSE
+  )
+  
+  grid.text(
+    paste0("[d] Residual = ", round(res$d*100, 1), "%  |  ",
+           "Total explained = ", round((1 - max(res$d, 0))*100, 1), "%"),
+    x  = 0.5, y = 0.03,
+    gp = gpar(col = "grey40", cex = 0.65)
+  )
+}
+
+# ============================================================
+#  DIBUJAR FIGURA
+#  Layout: fila 1 = títulos columnas
+#          filas 2-5 = Phase I a IV
+#          2 columnas: Surface | Subsurface
+# ============================================================
+
+grid.newpage()
+
+# Viewport principal con márgenes
+pushViewport(viewport(
+  x      = 0.5, y = 0.5,
+  width  = unit(0.96, "npc"),
+  height = unit(0.96, "npc")
+))
+
+pushViewport(viewport(layout = grid.layout(
+  nrow    = 5,
+  ncol    = 2,
+  heights = unit(c(0.6, 1, 1, 1, 1), "null"),
+  widths  = unit(c(1, 1), "null")
+)))
+
+# --- Títulos de columna ---
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+grid.text("Surface", gp = gpar(fontface = "bold", cex = 1.2, col = "black"))
+popViewport()
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 2))
+grid.text("Subsurface", gp = gpar(fontface = "bold", cex = 1.2, col = "black"))
+popViewport()
+
+# --- Diagramas por fase ---
+for (i in 1:4) {
+  ph <- fases[i]
+  
+  # Surface
+  pushViewport(viewport(
+    layout.pos.row = i + 1,
+    layout.pos.col = 1
+  ))
+  plot_euler_phase(results_surf[[ph]], "Surface")
+  popViewport()
+  
+  # Subsurface
+  pushViewport(viewport(
+    layout.pos.row = i + 1,
+    layout.pos.col = 2
+  ))
+  plot_euler_phase(results_bot[[ph]], "Subsurface")
+  popViewport()
+}
+
+popViewport() # layout
+popViewport() # viewport principal
+```
+# segun k diponible
+
+```{r}
+# ============================================================
+#  VARIANCE PARTITIONING POR FASES - VERSIÓN FLEXIBLE
+#  k adaptativo según n disponible
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(eulerr)
+library(grid)
+
+# ------------------------------------------------------------
+# FUNCIÓN PRINCIPAL
+# ------------------------------------------------------------
+run_varpart_phase <- function(phase_name, lip_data, bac_data) {
+  
+  cat("\n", rep("=", 50), "\n")
+  cat("  FASE:", phase_name, "\n")
+  cat(rep("=", 50), "\n")
+  
+  # --- 1. Filtrar por fase ---
+  idx_lip <- lip_data$typeset == phase_name
+  idx_bac <- bac_data$typeset == phase_name
+  lip_ph  <- lip_data[idx_lip, ]
+  bac_ph  <- bac_data[idx_bac, ]
+  
+  cat("Muestras lípidos:", sum(idx_lip),
+      "| Muestras bacterias:", sum(idx_bac), "\n")
+  
+  # --- 2. Match por ID ---
+  ids_comunes <- intersect(lip_ph$ID, bac_ph$ID)
+  
+  if (length(ids_comunes) < 4) {
+    cat("⚠ Menos de 4 muestras comunes, saltando fase", phase_name, "\n")
+    return(NULL)
+  }
+  cat("Muestras comunes:", length(ids_comunes), "\n")
+  
+  lip_ph <- lip_ph[match(ids_comunes, lip_ph$ID), ]
+  bac_ph <- bac_ph[match(ids_comunes, bac_ph$ID), ]
+  
+  # --- 3. Matrices ---
+  env_m <- lip_ph[, 3:12]
+  lip_m <- lip_ph[, 13:ncol(lip_ph)]
+  bac_m <- bac_ph[, sapply(bac_ph, is.numeric)]
+  
+  rows_ok <- complete.cases(env_m)
+  env_m   <- env_m[rows_ok, ]
+  lip_m   <- lip_m[rows_ok, ]
+  bac_m   <- bac_m[rows_ok, ]
+  n <- nrow(env_m)
+  
+  cat("Muestras tras eliminar NAs:", n, "\n")
+  
+  if (n < 4) {
+    cat("⚠ Muy pocas muestras completas, saltando\n")
+    return(NULL)
+  }
+  
+  # --- 4. Hellinger ---
+  lip_hell <- decostand(lip_m, method = "hellinger")
+  
+  # --- 5. k ADAPTATIVO ---
+  # Regla: nunca más de floor((n-2)/2) ejes por bloque
+  # n=4   → k=1
+  # n=5-6 → k=1
+  # n=7-8 → k=2
+  # n>=9  → k=2 (máximo razonable para estos datos)
+  k_max <- max(1, floor((n - 2) / 2))
+  k_env <- min(2, k_max)
+  k_bac <- min(2, k_max)
+  
+  cat("n=", n, "→ k_env=", k_env, "| k_bac=", k_bac,
+      "| Total predictores:", k_env + k_bac, "\n")
+  
+  # --- 6. PCA ambiente ---
+  env_scaled <- scale(env_m)
+  cols_ok    <- apply(env_scaled, 2, function(x) !any(is.na(x)) && var(x) > 0)
+  env_scaled <- env_scaled[, cols_ok]
+  
+  pca_env <- prcomp(env_scaled, center = FALSE, scale. = FALSE)
+  env_pca <- as.data.frame(pca_env$x[, 1:k_env, drop = FALSE])
+  colnames(env_pca) <- paste0("EnvPC", 1:k_env)
+  
+  var_env <- round(summary(pca_env)$importance[2, 1:k_env] * 100, 1)
+  cat("Varianza PCA ambiente:", paste(var_env, collapse = " + "), "%\n")
+  
+  # --- 7. PCoA bacterias ---
+  pcoa_res <- cmdscale(vegdist(bac_m, method = "bray"), k = k_bac, eig = TRUE)
+  bac_pcoa <- as.data.frame(pcoa_res$points[, 1:k_bac, drop = FALSE])
+  colnames(bac_pcoa) <- paste0("PCoA", 1:k_bac)
+  
+  var_bac <- round(pcoa_res$eig / sum(pcoa_res$eig[pcoa_res$eig > 0]) * 100, 1)
+  cat("Varianza PCoA bacterias:", sum(var_bac[1:k_bac]), "%\n")
+  
+  # --- 8. Variance partitioning ---
+  vp <- tryCatch(
+    varpart(lip_hell, env_pca, bac_pcoa),
+    error = function(e) {
+      cat("⚠ varpart falló:", e$message, "\n")
+      NULL
+    }
+  )
+  if (is.null(vp)) return(NULL)
+  
+  # --- 9. Tests de significancia ---
+  anova_a <- tryCatch(
+    anova(rda(lip_hell, env_pca, bac_pcoa), permutations = 999),
+    error = function(e) NULL
+  )
+  anova_c <- tryCatch(
+    anova(rda(lip_hell, bac_pcoa, env_pca), permutations = 999),
+    error = function(e) NULL
+  )
+  
+  # --- 10. Extraer fracciones ---
+  a_val <- vp$part$indfract$Adj.R.squared[1]
+  b_val <- vp$part$indfract$Adj.R.squared[2]
+  c_val <- vp$part$indfract$Adj.R.squared[3]
+  d_val <- vp$part$indfract$Adj.R.squared[4]
+  p_a   <- if (!is.null(anova_a)) anova_a$`Pr(>F)`[1] else NA
+  p_c   <- if (!is.null(anova_c)) anova_c$`Pr(>F)`[1] else NA
+  
+  cat(sprintf("[a] Ambiente único:  %.1f%%  (p=%.3f)\n", a_val*100, ifelse(is.na(p_a), NaN, p_a)))
+  cat(sprintf("[b] Compartido:      %.1f%%\n",            b_val*100))
+  cat(sprintf("[c] Comunidad única: %.1f%%  (p=%.3f)\n", c_val*100, ifelse(is.na(p_c), NaN, p_c)))
+  cat(sprintf("[d] Residual:        %.1f%%\n",            d_val*100))
+  
+  list(
+    phase   = phase_name,
+    n       = n,
+    k_env   = k_env,
+    k_bac   = k_bac,
+    a = a_val, b = b_val, c = c_val, d = d_val,
+    p_a = p_a, p_c = p_c,
+    vp  = vp,
+    anova_a = anova_a,
+    anova_c = anova_c
+  )
+}
+
+# ============================================================
+#  CORRER PARA SUPERFICIE Y SUBSUPERFICIE
+# ============================================================
+
+fases <- c("Phase1", "Phase2", "Phase3", "Phase4")
+
+results_surf <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_surface_filtrados, ordenes_surface_rel))
+names(results_surf) <- fases
+
+results_bot <- lapply(fases, function(ph)
+  run_varpart_phase(ph, datos_bottom_filtrados, ordenes_bottom_rel))
+names(results_bot) <- fases
+
+# ============================================================
+#  FIGURA EULER
+# ============================================================
+
+sig <- function(p) {
+  if (is.na(p))   return("")
+  if (p <= 0.001) return("***")
+  if (p <= 0.01)  return("**")
+  if (p <= 0.05)  return("*")
+  return("ns")
+}
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+phase_labels <- c(
+  "Phase1" = "Phase I (Days 1-11)",
+  "Phase2" = "Phase II (Days 12-19)",
+  "Phase3" = "Phase III (Days 20-37)",
+  "Phase4" = "Phase IV (Days 38-50)"
+)
+
+plot_euler_phase <- function(res, depth_label) {
+  
+  if (is.null(res)) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("Insufficient data\n(n < 4)",
+              gp = gpar(col = "grey50", cex = 0.85))
+    return(invisible(NULL))
+  }
+  
+  a_plot <- max(res$a, 0)
+  b_plot <- max(res$b, 0)
+  c_plot <- max(res$c, 0)
+  
+  if ((a_plot + b_plot + c_plot) == 0) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("All fractions ≤ 0",
+              gp = gpar(col = "grey50", cex = 0.85))
+    return(invisible(NULL))
+  }
+  
+  fit <- tryCatch(
+    euler(c(
+      "Environment"           = a_plot,
+      "Community"             = c_plot,
+      "Environment&Community" = b_plot
+    )),
+    error = function(e) NULL
+  )
+  
+  if (is.null(fit)) {
+    grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+    grid.text("Could not fit Euler",
+              gp = gpar(col = "grey50", cex = 0.8))
+    return(invisible(NULL))
+  }
+  
+  f_a <- if (!is.null(res$anova_a)) round(res$anova_a[1, "F"], 2) else NA
+  f_c <- if (!is.null(res$anova_c)) round(res$anova_c[1, "F"], 2) else NA
+  
+  label_a <- paste0(round(a_plot*100, 1), "%",
+                    if (!is.na(f_a)) paste0("\nF=", f_a, " ", sig(res$p_a)) else "")
+  label_c <- paste0(round(c_plot*100, 1), "%",
+                    if (!is.na(f_c)) paste0("\nF=", f_c, " ", sig(res$p_c)) else "")
+  label_b <- paste0(round(b_plot*100, 1), "%")
+  
+  main_title <- paste0(phase_labels[res$phase],
+                       " (n=", res$n,
+                       ", k=", res$k_env, ")")
+  
+  print(
+    plot(fit,
+         fills      = list(fill = c(col_amb, col_com), alpha = 0.45),
+         edges      = list(col  = c(col_amb, col_com), lwd = 2),
+         labels     = list(labels = c("Environment", "Community"),
+                           font = 2, cex = 0.80),
+         quantities = list(labels = c(label_a, label_c, label_b),
+                           font = 1, cex = 0.75),
+         main = list(label = main_title, cex = 0.82)),
+    newpage = FALSE
+  )
+  
+  grid.text(
+    paste0("[d] Residual = ", round(res$d*100, 1), "%  |  ",
+           "Total explained = ", round((1 - max(res$d, 0))*100, 1), "%"),
+    x  = 0.5, y = 0.03,
+    gp = gpar(col = "grey40", cex = 0.65)
+  )
+}
+
+# --- Figura 4 filas x 2 columnas ---
+grid.newpage()
+
+pushViewport(viewport(
+  x      = 0.5, y = 0.5,
+  width  = unit(0.96, "npc"),
+  height = unit(0.96, "npc")
+))
+
+pushViewport(viewport(layout = grid.layout(
+  nrow    = 5,
+  ncol    = 2,
+  heights = unit(c(0.5, 1, 1, 1, 1), "null"),
+  widths  = unit(c(1, 1), "null")
+)))
+
+# Títulos columnas
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+grid.text("Surface", gp = gpar(fontface = "bold", cex = 1.2))
+popViewport()
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 2))
+grid.text("Subsurface", gp = gpar(fontface = "bold", cex = 1.2))
+popViewport()
+
+# Diagramas
+for (i in 1:4) {
+  ph <- fases[i]
+  
+  pushViewport(viewport(layout.pos.row = i + 1, layout.pos.col = 1))
+  plot_euler_phase(results_surf[[ph]], "Surface")
+  popViewport()
+  
+  pushViewport(viewport(layout.pos.row = i + 1, layout.pos.col = 2))
+  plot_euler_phase(results_bot[[ph]], "Subsurface")
+  popViewport()
+}
+
+popViewport()
+popViewport()
+```
+
+
+
+#opccion final
+
+```{r}
+# ============================================================
+#  FIGURA FINAL - SOLO EULER GLOBAL
+#  Surface + Subsurface
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(eulerr)
+library(grid)
+library(cowplot)
+library(ggplotify)
+
+# ============================================================
+#  PASO 1: CARGAR DATOS
+# ============================================================
+
+datos_lip <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/combined_data_only_IPL_envriomental.csv")
+datos_bac <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/merged_data_clean_M5_M6_ORDER_phases_final.csv")
+
+# Separar
+datos_surface_lip <- datos_lip %>% filter(grepl("Surface", ID))
+datos_bottom_lip  <- datos_lip %>% filter(grepl("Bottom",  ID))
+datos_surface_bac <- datos_bac %>% filter(grepl("Surface", ID))
+datos_bottom_bac  <- datos_bac %>% filter(grepl("Bottom",  ID))
+
+# Filtrar lípidos superficie
+lipid_vars_s <- 13:ncol(datos_surface_lip)
+datos_surface_lip[, lipid_vars_s] <- datos_surface_lip[, lipid_vars_s] %>%
+  mutate(across(everything(), as.numeric))
+suma_lip_s <- colSums(datos_surface_lip[, lipid_vars_s], na.rm = TRUE)
+lip_sel_s  <- names(suma_lip_s[suma_lip_s > 20])
+datos_surface_filtrados <- bind_cols(
+  datos_surface_lip[, 1:12],
+  datos_surface_lip[, lip_sel_s]
+)
+
+# Filtrar lípidos fondo
+lipid_vars_b <- 13:ncol(datos_bottom_lip)
+datos_bottom_lip[, lipid_vars_b] <- datos_bottom_lip[, lipid_vars_b] %>%
+  mutate(across(everything(), as.numeric))
+suma_lip_b <- colSums(datos_bottom_lip[, lipid_vars_b], na.rm = TRUE)
+lip_sel_b  <- names(suma_lip_b[suma_lip_b > 20])
+datos_bottom_filtrados <- bind_cols(
+  datos_bottom_lip[, 1:12],
+  datos_bottom_lip[, lip_sel_b]
+)
+
+# Filtrar órdenes superficie
+ord_vars_s <- 13:ncol(datos_surface_bac)
+datos_surface_bac[, ord_vars_s] <- datos_surface_bac[, ord_vars_s] %>%
+  mutate(across(everything(), as.numeric))
+suma_ord_s <- colSums(datos_surface_bac[, ord_vars_s], na.rm = TRUE)
+ord_sel_s  <- names(suma_ord_s[suma_ord_s > 4])
+bac_surface_filtrados <- bind_cols(
+  datos_surface_bac[, 1:12],
+  datos_surface_bac[, ord_sel_s]
+)
+
+# Filtrar órdenes fondo
+ord_vars_b <- 13:ncol(datos_bottom_bac)
+datos_bottom_bac[, ord_vars_b] <- datos_bottom_bac[, ord_vars_b] %>%
+  mutate(across(everything(), as.numeric))
+suma_ord_b <- colSums(datos_bottom_bac[, ord_vars_b], na.rm = TRUE)
+ord_sel_b  <- names(suma_ord_b[suma_ord_b > 4])
+bac_bottom_filtrados <- bind_cols(
+  datos_bottom_bac[, 1:12],
+  datos_bottom_bac[, ord_sel_b]
+)
+
+# Abundancias relativas
+ord_surf_raw        <- bac_surface_filtrados[, 13:ncol(bac_surface_filtrados)]
+ordenes_surface_rel <- ord_surf_raw / rowSums(ord_surf_raw, na.rm = TRUE)
+ordenes_surface_rel <- bind_cols(bac_surface_filtrados[, 1:12], ordenes_surface_rel)
+
+ord_bot_raw         <- bac_bottom_filtrados[, 13:ncol(bac_bottom_filtrados)]
+ordenes_bottom_rel  <- ord_bot_raw / rowSums(ord_bot_raw, na.rm = TRUE)
+ordenes_bottom_rel  <- bind_cols(bac_bottom_filtrados[, 1:12], ordenes_bottom_rel)
+
+cat("Lípidos superficie:", length(lip_sel_s), "| Fondo:", length(lip_sel_b), "\n")
+cat("Órdenes superficie:", length(ord_sel_s), "| Fondo:", length(ord_sel_b), "\n")
+
+# ============================================================
+#  PASO 2: FUNCIÓN VARPART
+# ============================================================
+
+run_varpart <- function(lip_data, bac_data, label = "") {
+
+  ids <- intersect(lip_data$ID, bac_data$ID)
+  if (length(ids) < 4) {
+    cat("⚠", label, "- menos de 4 muestras comunes\n")
+    return(NULL)
+  }
+
+  lip_m <- lip_data[match(ids, lip_data$ID), ]
+  bac_m <- bac_data[match(ids, bac_data$ID), ]
+
+  env_m <- lip_m[, 3:12]
+  lip_m <- lip_m[, 13:ncol(lip_m)]
+  bac_m <- bac_m[, sapply(bac_m, is.numeric)]
+
+  rows_ok <- complete.cases(env_m)
+  env_m   <- env_m[rows_ok, ]
+  lip_m   <- lip_m[rows_ok, ]
+  bac_m   <- bac_m[rows_ok, ]
+  n       <- nrow(env_m)
+
+  if (n < 4) { cat("⚠", label, "- n <4\n"); return(NULL) }
+  cat("\n---", label, "| n =", n, "---\n")
+
+  k_max <- max(1, floor((n - 2) / 2))
+  k_env <- min(2, k_max)
+  k_bac <- min(3, k_max)
+  cat("k_env =", k_env, "| k_bac =", k_bac, "\n")
+
+  lip_hell <- decostand(lip_m, method = "hellinger")
+
+  env_scaled <- scale(env_m)
+  cols_ok    <- apply(env_scaled, 2, function(x) !any(is.na(x)) && var(x) > 0)
+  env_scaled <- env_scaled[, cols_ok]
+  pca_env    <- prcomp(env_scaled, center = FALSE, scale. = FALSE)
+  env_pca    <- as.data.frame(pca_env$x[, 1:k_env, drop = FALSE])
+  colnames(env_pca) <- paste0("EnvPC", 1:k_env)
+
+  pcoa_res <- cmdscale(vegdist(bac_m, method = "bray"), k = k_bac, eig = TRUE)
+  bac_pcoa <- as.data.frame(pcoa_res$points[, 1:k_bac, drop = FALSE])
+  colnames(bac_pcoa) <- paste0("PCoA", 1:k_bac)
+
+  vp <- tryCatch(
+    varpart(lip_hell, env_pca, bac_pcoa),
+    error = function(e) { cat("⚠ varpart falló\n"); NULL }
+  )
+  if (is.null(vp)) return(NULL)
+
+  anova_a <- tryCatch(
+    anova(rda(lip_hell, env_pca, bac_pcoa), permutations = 999),
+    error = function(e) NULL
+  )
+  anova_c <- tryCatch(
+    anova(rda(lip_hell, bac_pcoa, env_pca), permutations = 999),
+    error = function(e) NULL
+  )
+
+  a_val <- vp$part$indfract$Adj.R.squared[1]
+  b_val <- vp$part$indfract$Adj.R.squared[2]
+  c_val <- vp$part$indfract$Adj.R.squared[3]
+  d_val <- vp$part$indfract$Adj.R.squared[4]
+  p_a   <- if (!is.null(anova_a)) anova_a$`Pr(>F)`[1] else NA
+  p_c   <- if (!is.null(anova_c)) anova_c$`Pr(>F)`[1] else NA
+
+  cat(sprintf("[a]=%.1f%%(p=%.3f) [b]=%.1f%% [c]=%.1f%%(p=%.3f) [d]=%.1f%%\n",
+      a_val*100, ifelse(is.na(p_a), NaN, p_a),
+      b_val*100, c_val*100, ifelse(is.na(p_c), NaN, p_c),
+      d_val*100))
+
+  list(label=label, n=n, k_env=k_env, k_bac=k_bac,
+       a=a_val, b=b_val, c=c_val, d=d_val,
+       p_a=p_a, p_c=p_c,
+       vp=vp, anova_a=anova_a, anova_c=anova_c)
+}
+
+# ============================================================
+#  PASO 3: VARPART GLOBAL
+# ============================================================
+
+cat("\n========== GLOBAL ==========\n")
+res_glob_surf <- run_varpart(datos_surface_filtrados, ordenes_surface_rel,
+                              "Global Surface")
+res_glob_bot  <- run_varpart(datos_bottom_filtrados,  ordenes_bottom_rel,
+                              "Global Subsurface")
+
+# ============================================================
+#  PASO 4: FIGURA EULER GLOBAL
+# ============================================================
+
+sig <- function(p) {
+  if (is.na(p))   return("")
+  if (p <= 0.001) return("***")
+  if (p <= 0.01)  return("**")
+  if (p <= 0.05)  return("*")
+  return("ns")
+}
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+make_euler_grob <- function(res, title) {
+  if (is.null(res)) return(NULL)
+  a <- res$a; b <- res$b; c <- res$c; d <- res$d
+  f_a <- if (!is.null(res$anova_a)) round(res$anova_a[1, "F"], 2) else NA
+  p_a <- res$p_a
+  f_c <- if (!is.null(res$anova_c)) round(res$anova_c[1, "F"], 2) else NA
+  p_c <- res$p_c
+
+  fit <- euler(c(
+    "Environment"           = max(a, 0),
+    "Community"             = max(c, 0),
+    "Environment&Community" = max(b, 0)
+  ))
+
+  as.grob(function() {
+    print(plot(fit,
+         fills      = list(fill = c(col_amb, col_com), alpha = 0.45),
+         edges      = list(col  = c(col_amb, col_com), lwd = 2),
+         labels     = list(labels = c("Environment", "Community"),
+                           font = 2, cex = 1.1),
+         quantities = list(
+           labels = c(
+             paste0(round(max(a,0)*100,1), "%\nF=", f_a, " ", sig(p_a)),
+             paste0(round(max(c,0)*100,1), "%\nF=", f_c, " ", sig(p_c)),
+             paste0(round(max(b,0)*100,1), "%")
+           ), font = 1, cex = 0.95),
+         main = list(label = paste0(title, " (n=", res$n, ")"),
+                     cex = 1.2, fontface = "bold")))
+    grid.text(
+      paste0("[d] Residual = ", round(d*100,1),
+             "%  |  Total explained = ", round((1-max(d,0))*100,1), "%"),
+      x = 0.5, y = 0.04,
+      gp = gpar(col = "grey40", cex = 0.75)
+    )
+  })
+}
+
+grob_surf <- make_euler_grob(res_glob_surf, "Surface")
+grob_bot  <- make_euler_grob(res_glob_bot,  "Subsurface")
+
+# Figura final vertical
+grid.newpage()
+pushViewport(viewport(
+  x = 0.5, y = 0.5,
+  width  = unit(0.96, "npc"),
+  height = unit(0.96, "npc")
+))
+pushViewport(viewport(layout = grid.layout(nrow = 2, ncol = 1)))
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+print(grob_surf, newpage = FALSE)
+popViewport()
+
+pushViewport(viewport(layout.pos.row = 2, layout.pos.col = 1))
+print(grob_bot, newpage = FALSE)
+popViewport()
+
+popViewport()
+popViewport()
+```
+
+```{r}
+# Figura final con cowplot (más simple y confiable)
+figura_final <- plot_grid(
+  grob_surf, grob_bot,
+  ncol        = 1,
+  labels      = c("A", "B"),
+  label_size  = 14,
+  label_fontface = "bold"
+)
+
+figura_final
+```
+
+
+```{r}
+# ============================================================
+#  FIGURA CON EULER GLOBAL + EULER POR FASES
+# ============================================================
+
+# Primero correr los resultados por fases (usando los datos del script anterior)
+fases_todas <- c("Phase1", "Phase2", "Phase3", "Phase4")
+
+results_fases <- lapply(fases_todas, function(ph) {
+  lip_ph <- datos_surface_filtrados[datos_surface_filtrados$typeset == ph, ]
+  bac_ph <- ordenes_surface_rel[ordenes_surface_rel$typeset == ph, ]
+  run_varpart(lip_ph, bac_ph, paste("Surface", ph))
+})
+names(results_fases) <- fases_todas
+
+# ============================================================
+#  FUNCIÓN EULER POR FASE (mismo estilo que global)
+# ============================================================
+
+phase_titles <- c(
+  "Phase1" = "Phase I\n(Days 1-11)",
+  "Phase2" = "Phase II\n(Days 12-19)",
+  "Phase3" = "Phase III\n(Days 20-37)",
+  "Phase4" = "Phase IV\n(Days 38-50)"
+)
+
+make_euler_phase_grob <- function(res, phase_name) {
+
+  # Si no hay resultado suficiente, mostrar caja gris
+  if (is.null(res)) {
+    return(as.grob(function() {
+      grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+      grid.text(paste0(phase_titles[phase_name], "\nInsufficient data\n(n < 4)"),
+                gp = gpar(col = "grey50", cex = 0.85))
+    }))
+  }
+
+  a <- res$a; b <- res$b; c <- res$c; d <- res$d
+  f_a <- if (!is.null(res$anova_a)) round(res$anova_a[1, "F"], 2) else NA
+  p_a <- res$p_a
+  f_c <- if (!is.null(res$anova_c)) round(res$anova_c[1, "F"], 2) else NA
+  p_c <- res$p_c
+
+  # Si todas las fracciones son <= 0
+  if (max(c(max(a,0), max(b,0), max(c,0))) == 0) {
+    return(as.grob(function() {
+      grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+      grid.text(paste0(phase_titles[phase_name], "\nAll fractions ≤ 0"),
+                gp = gpar(col = "grey50", cex = 0.85))
+    }))
+  }
+
+  fit <- tryCatch(
+    euler(c(
+      "Environment"           = max(a, 0),
+      "Community"             = max(c, 0),
+      "Environment&Community" = max(b, 0)
+    )),
+    error = function(e) NULL
+  )
+
+  if (is.null(fit)) {
+    return(as.grob(function() {
+      grid.rect(gp = gpar(fill = "grey95", col = "grey80"))
+      grid.text(paste0(phase_titles[phase_name], "\nCould not fit"),
+                gp = gpar(col = "grey50", cex = 0.85))
+    }))
+  }
+
+  as.grob(function() {
+    print(plot(fit,
+         fills      = list(fill = c(col_amb, col_com), alpha = 0.45),
+         edges      = list(col  = c(col_amb, col_com), lwd = 2),
+         labels     = list(labels = c("Environment", "Community"),
+                           font = 2, cex = 0.85),
+         quantities = list(
+           labels = c(
+             paste0(round(max(a,0)*100,1), "%",
+                    if (!is.na(f_a)) paste0("\nF=", f_a, " ", sig(p_a)) else ""),
+             paste0(round(max(c,0)*100,1), "%",
+                    if (!is.na(f_c)) paste0("\nF=", f_c, " ", sig(p_c)) else ""),
+             paste0(round(max(b,0)*100,1), "%")
+           ), font = 1, cex = 0.78),
+         main = list(label = paste0(phase_titles[phase_name],
+                                    " (n=", res$n, ")"),
+                     cex = 0.90, fontface = "bold")))
+    grid.text(
+      paste0("[d] Residual = ", round(d*100,1), "%"),
+      x = 0.5, y = 0.03,
+      gp = gpar(col = "grey40", cex = 0.65)
+    )
+  })
+}
+
+# Crear grobs por fase
+grobs_fases <- lapply(fases_todas, function(ph) {
+  make_euler_phase_grob(results_fases[[ph]], ph)
+})
+names(grobs_fases) <- fases_todas
+
+# Panel B: 4 Euler en fila
+panel_B_euler <- plot_grid(
+  grobs_fases[["Phase1"]],
+  grobs_fases[["Phase2"]],
+  grobs_fases[["Phase3"]],
+  grobs_fases[["Phase4"]],
+  ncol = 4
+)
+
+# Panel A: Euler global vertical
+panel_A <- plot_grid(
+  grob_surf, grob_bot,
+  ncol = 1,
+  labels = c("A", ""),
+  label_size = 14,
+  label_fontface = "bold"
+)
+
+# Figura final: Panel A izquierda, Panel B derecha
+figura_fases_euler <- plot_grid(
+  panel_A,
+  panel_B_euler,
+  ncol          = 2,
+  rel_widths    = c(1, 2),
+  labels        = c("", "B"),
+  label_size    = 14,
+  label_fontface = "bold"
+)
+
+figura_fases_euler
+```
+#OVERLAAP DE DIAAS
+```{r}
+# ============================================================
+#  VARPART CON VENTANAS TEMPORALES SOLAPADAS
+#  VERSION COMPLETA
+# ============================================================
+
+library(vegan)
+library(dplyr)
+library(eulerr)
+library(grid)
+library(cowplot)
+library(ggplotify)
+
+# ============================================================
+#  EXTRAER DAY DESDE ID
+# ============================================================
+
+datos_surface_filtrados$Day <- as.numeric(
+  sub(".*_Day_([0-9]+).*",
+      "\\1",
+      datos_surface_filtrados$ID)
+)
+
+ordenes_surface_rel$Day <- as.numeric(
+  sub(".*_Day_([0-9]+).*",
+      "\\1",
+      ordenes_surface_rel$ID)
+)
+
+# ============================================================
+#  REVISAR
+# ============================================================
+
+table(datos_surface_filtrados$Day)
+
+# ============================================================
+#  COLORES
+# ============================================================
+
+col_amb <- "#2166AC"
+col_com <- "#D6604D"
+
+# ============================================================
+#  FUNCION SIGNIFICANCIA
+# ============================================================
+
+sig <- function(p) {
+
+  if (is.na(p))   return("")
+  if (p <= 0.001) return("***")
+  if (p <= 0.01)  return("**")
+  if (p <= 0.05)  return("*")
+
+  return("ns")
+}
+
+# ============================================================
+#  FUNCION VARPART MINIMAL
+# ============================================================
+
+run_varpart_minimal <- function(lip_data,
+                                bac_data,
+                                label = "") {
+
+  cat("\n============================\n")
+  cat(label, "\n")
+  cat("============================\n")
+
+  # ----------------------------------------------------------
+  # MATCH IDS
+  # ----------------------------------------------------------
+
+  ids <- intersect(
+    lip_data$ID,
+    bac_data$ID
+  )
+
+  if (length(ids) < 4) {
+
+    cat("⚠ Menos de 4 muestras\n")
+    return(NULL)
+  }
+
+  lip_m <- lip_data[
+    match(ids, lip_data$ID),
+  ]
+
+  bac_m <- bac_data[
+    match(ids, bac_data$ID),
+  ]
+
+  # ----------------------------------------------------------
+  # MATRICES
+  # ----------------------------------------------------------
+
+  env_m <- lip_m[, 3:12]
+
+  lip_m <- lip_m[, 13:(ncol(lip_m)-1)]
+
+  bac_m <- bac_m[, sapply(bac_m, is.numeric)]
+
+  # remover Day del bacteriano
+  bac_m <- bac_m[, !colnames(bac_m) %in% "Day"]
+
+  # ----------------------------------------------------------
+  # COMPLETE CASES
+  # ----------------------------------------------------------
+
+  rows_ok <- complete.cases(env_m)
+
+  env_m <- env_m[
+    rows_ok,
+    ,
+    drop = FALSE
+  ]
+
+  lip_m <- lip_m[
+    rows_ok,
+    ,
+    drop = FALSE
+  ]
+
+  bac_m <- bac_m[
+    rows_ok,
+    ,
+    drop = FALSE
+  ]
+
+  n <- nrow(env_m)
+
+  cat("n =", n, "\n")
+
+  if (n < 4) {
+
+    cat("⚠ n insuficiente\n")
+    return(NULL)
+  }
+
+  # ----------------------------------------------------------
+  # ELIMINAR VARIABLES CONSTANTES
+  # ----------------------------------------------------------
+
+  env_var <- apply(
+    env_m,
+    2,
+    var,
+    na.rm = TRUE
+  )
+
+  lip_var <- apply(
+    lip_m,
+    2,
+    var,
+    na.rm = TRUE
+  )
+
+  bac_var <- apply(
+    bac_m,
+    2,
+    var,
+    na.rm = TRUE
+  )
+
+  env_m <- env_m[
+    ,
+    env_var > 0,
+    drop = FALSE
+  ]
+
+  lip_m <- lip_m[
+    ,
+    lip_var > 0,
+    drop = FALSE
+  ]
+
+  bac_m <- bac_m[
+    ,
+    bac_var > 0,
+    drop = FALSE
+  ]
+
+  cat("Variables ambientales:", ncol(env_m), "\n")
+  cat("Lípidos:", ncol(lip_m), "\n")
+  cat("Órdenes:", ncol(bac_m), "\n")
+
+  if (ncol(env_m) < 1 |
+      ncol(lip_m) < 2 |
+      ncol(bac_m) < 2) {
+
+    cat("⚠ Muy poca variación\n")
+    return(NULL)
+  }
+
+  # ----------------------------------------------------------
+  # HELLINGER
+  # ----------------------------------------------------------
+
+  lip_hell <- decostand(
+    lip_m,
+    method = "hellinger"
+  )
+
+  # ----------------------------------------------------------
+  # PCA AMBIENTAL
+  # ----------------------------------------------------------
+
+  env_scaled <- scale(env_m)
+
+  pca_env <- tryCatch(
+
+    prcomp(
+      env_scaled,
+      center = FALSE,
+      scale. = FALSE
+    ),
+
+    error = function(e) NULL
+  )
+
+  if (is.null(pca_env)) {
+
+    cat("⚠ PCA ambiental falló\n")
+    return(NULL)
+  }
+
+  env_pca <- data.frame(
+    EnvPC1 = pca_env$x[,1]
+  )
+
+  # ----------------------------------------------------------
+  # PCoA BACTERIANO
+  # ----------------------------------------------------------
+
+  dist_bac <- tryCatch(
+
+    vegdist(
+      bac_m,
+      method = "bray"
+    ),
+
+    error = function(e) NULL
+  )
+
+  if (is.null(dist_bac)) {
+
+    cat("⚠ Bray falló\n")
+    return(NULL)
+  }
+
+  pcoa_res <- tryCatch(
+
+    cmdscale(
+      dist_bac,
+      k = 1,
+      eig = TRUE
+    ),
+
+    error = function(e) NULL
+  )
+
+  if (is.null(pcoa_res)) {
+
+    cat("⚠ PCoA falló\n")
+    return(NULL)
+  }
+
+  bac_pcoa <- data.frame(
+    PCoA1 = pcoa_res$points[,1]
+  )
+
+  # ----------------------------------------------------------
+  # VARPART
+  # ----------------------------------------------------------
+
+  vp <- tryCatch(
+
+    varpart(
+      lip_hell,
+      env_pca,
+      bac_pcoa
+    ),
+
+    error = function(e) NULL
+  )
+
+  if (is.null(vp)) {
+
+    cat("⚠ varpart falló\n")
+    return(NULL)
+  }
+
+  # ----------------------------------------------------------
+  # EXTRAER FRACCIONES
+  # ----------------------------------------------------------
+
+  fract <- vp$part$indfract
+
+  a_val <- fract["[a]", "Adj.R.squared"]
+  b_val <- fract["[b]", "Adj.R.squared"]
+  c_val <- fract["[c]", "Adj.R.squared"]
+  d_val <- fract["[d]", "Adj.R.squared"]
+
+  # negativos -> 0
+  a_plot <- max(a_val, 0)
+  b_plot <- max(b_val, 0)
+  c_plot <- max(c_val, 0)
+  d_plot <- max(d_val, 0)
+
+  # ----------------------------------------------------------
+  # ANOVA
+  # ----------------------------------------------------------
+
+  anova_a <- tryCatch(
+
+    anova(
+      rda(
+        lip_hell,
+        env_pca,
+        bac_pcoa
+      ),
+      permutations = 999
+    ),
+
+    error = function(e) NULL
+  )
+
+  anova_c <- tryCatch(
+
+    anova(
+      rda(
+        lip_hell,
+        bac_pcoa,
+        env_pca
+      ),
+      permutations = 999
+    ),
+
+    error = function(e) NULL
+  )
+
+  p_a <- if (!is.null(anova_a)) {
+    anova_a$`Pr(>F)`[1]
+  } else {
+    NA
+  }
+
+  p_c <- if (!is.null(anova_c)) {
+    anova_c$`Pr(>F)`[1]
+  } else {
+    NA
+  }
+
+  cat(sprintf(
+    "[a]=%.1f%% | [b]=%.1f%% | [c]=%.1f%% | [d]=%.1f%%\n",
+    a_plot * 100,
+    b_plot * 100,
+    c_plot * 100,
+    d_plot * 100
+  ))
+
+  # ----------------------------------------------------------
+  # RETURN
+  # ----------------------------------------------------------
+
+  list(
+    label = label,
+    n = n,
+
+    a = a_plot,
+    b = b_plot,
+    c = c_plot,
+    d = d_plot,
+
+    p_a = p_a,
+    p_c = p_c,
+
+    anova_a = anova_a,
+    anova_c = anova_c
+  )
+}
+
+# ============================================================
+#  VENTANAS TEMPORALES SOLAPADAS
+# ============================================================
+
+windows <- list(
+
+  "W1" = c(1, 11),
+  "W2" = c(12, 20),
+  "W3" = c(18, 24),
+  "W4" = c(20, 50)
+)
+
+# ============================================================
+#  TITULOS
+# ============================================================
+
+window_titles <- c(
+
+  "W1" = "Window 1\n(Days 1-11)",
+  "W2" = "Window 2\n(Days 12-20)",
+  "W3" = "Window 3\n(Days 18-24)",
+  "W4" = "Window 4\n(Days 20-50)"
+)
+# ============================================================
+#  CORRER ANALISIS
+# ============================================================
+
+results_windows <- lapply(
+  names(windows),
+  function(w) {
+
+    d1 <- windows[[w]][1]
+    d2 <- windows[[w]][2]
+
+    lip_w <- datos_surface_filtrados %>%
+      filter(
+        Day >= d1 &
+        Day <= d2
+      )
+
+    bac_w <- ordenes_surface_rel %>%
+      filter(
+        Day >= d1 &
+        Day <= d2
+      )
+
+    run_varpart_minimal(
+      lip_w,
+      bac_w,
+      paste0(
+        w,
+        " (Days ",
+        d1,
+        "-",
+        d2,
+        ")"
+      )
+    )
+  }
+)
+
+names(results_windows) <- names(windows)
+
+# ============================================================
+#  FUNCION EULER
+# ============================================================
+
+make_euler_window_grob <- function(res,
+                                   window_name) {
+
+  if (is.null(res)) {
+
+    return(as.grob(function() {
+
+      grid.rect(
+        gp = gpar(
+          fill = "grey95",
+          col = "grey80"
+        )
+      )
+
+      grid.text(
+        paste0(
+          window_titles[window_name],
+          "\nNo structure"
+        ),
+        gp = gpar(
+          col = "grey40",
+          cex = 0.85
+        )
+      )
+    }))
+  }
+
+  a <- res$a
+  b <- res$b
+  c <- res$c
+  d <- res$d
+
+  if ((a + b + c) <= 0) {
+
+    return(as.grob(function() {
+
+      grid.rect(
+        gp = gpar(
+          fill = "grey95",
+          col = "grey80"
+        )
+      )
+
+      grid.text(
+        paste0(
+          window_titles[window_name],
+          "\nAll fractions ≤ 0"
+        ),
+        gp = gpar(
+          col = "grey40",
+          cex = 0.85
+        )
+      )
+    }))
+  }
+
+  fit <- tryCatch(
+
+    euler(
+      c(
+        "Environment" = max(a, 0.001),
+        "Community" = max(c, 0.001),
+        "Environment&Community" = max(b, 0.001)
+      ),
+      shape = "ellipse"
+    ),
+
+    error = function(e) NULL
+  )
+
+  if (is.null(fit)) {
+
+    return(as.grob(function() {
+
+      grid.rect(
+        gp = gpar(
+          fill = "grey95",
+          col = "grey80"
+        )
+      )
+
+      grid.text(
+        paste0(
+          window_titles[window_name],
+          "\nEuler failed"
+        ),
+        gp = gpar(
+          col = "grey40",
+          cex = 0.85
+        )
+      )
+    }))
+  }
+
+  f_a <- if (!is.null(res$anova_a)) {
+    round(res$anova_a[1, "F"], 2)
+  } else {
+    NA
+  }
+
+  f_c <- if (!is.null(res$anova_c)) {
+    round(res$anova_c[1, "F"], 2)
+  } else {
+    NA
+  }
+
+  as.grob(function() {
+
+    print(
+
+      plot(
+        fit,
+
+        fills = list(
+          fill = c(col_amb, col_com),
+          alpha = 0.35
+        ),
+
+        edges = list(
+          col = c(col_amb, col_com),
+          lwd = 2.5
+        ),
+
+        labels = list(
+          labels = c(
+            "Environment",
+            "Community"
+          ),
+          font = 2,
+          cex = 0.8
+        ),
+
+        quantities = list(
+
+          labels = c(
+
+            paste0(
+              round(a * 100, 1),
+              "%",
+              "\nF=",
+              f_a,
+              " ",
+              sig(res$p_a)
+            ),
+
+            paste0(
+              round(c * 100, 1),
+              "%",
+              "\nF=",
+              f_c,
+              " ",
+              sig(res$p_c)
+            ),
+
+            paste0(
+              round(b * 100, 1),
+              "%"
+            )
+          ),
+
+          font = 1,
+          cex = 0.72
+        ),
+
+        main = list(
+          label = paste0(
+            window_titles[window_name],
+            "\n(n=",
+            res$n,
+            ")"
+          ),
+          cex = 0.9,
+          fontface = "bold"
+        )
+      )
+    )
+
+    grid.text(
+      paste0(
+        "Residual = ",
+        round(d * 100, 1),
+        "%"
+      ),
+      x = 0.5,
+      y = 0.03,
+      gp = gpar(
+        col = "grey40",
+        cex = 0.65
+      )
+    )
+  })
+}
+
+# ============================================================
+#  CREAR GROB
+# ============================================================
+
+grobs_windows <- lapply(
+  names(windows),
+  function(w) {
+
+    make_euler_window_grob(
+      results_windows[[w]],
+      w
+    )
+  }
+)
+
+# ============================================================
+#  FIGURA FINAL
+# ============================================================
+
+figura_windows <- plot_grid(
+
+  grobs_windows[[1]],
+  grobs_windows[[2]],
+  grobs_windows[[3]],
+  grobs_windows[[4]],
+
+  ncol = 4
+)
+
+figura_windows
+```
+
+
+# Obtencion de Tablas estdisticas
+
+```{r}
+library(vegan)
+
+# Selección de datos para Surface
+env_surface <- datos_surface_filtrados[, 3:12]
+lipids_surface <- datos_surface_filtrados[, 13:ncol(datos_surface_filtrados)]
+phase_surface <- datos_surface_filtrados$typeset
+
+# Asegurar datos completos
+complete_rows <- complete.cases(env_surface)
+lipids_surface_clean <- lipids_surface[complete_rows, ]
+phase_surface_clean <- phase_surface[complete_rows]
+
+# ANOVA PERMANOVA sobre matriz de distancias
+adonis_result <- adonis2(lipids_surface_clean ~ phase_surface_clean, method = "euclidean")
+print(adonis_result)
+```
+
+```{r}
+#install.packages("RVAideMemoire")
+library(RVAideMemoire)
+
+# Asegúrate de que el factor sea un factor verdadero
+phase_surface_clean <- as.factor(phase_surface_clean)
+
+# Hacer el test post-hoc por pares con permutaciones
+posthoc_result <- pairwise.perm.manova(dist(lipids_surface_clean), phase_surface_clean, nperm = 999)
+print(posthoc_result)
+```
+
+```{r}
+# Extraer matriz de p-valores
+pval_matrix <- posthoc_result$p.value
+
+# Inicializar vectores vacíos
+comparisons <- c()
+pvals <- c()
+
+# Recorrer la matriz triangular superior
+for (i in seq_len(nrow(pval_matrix))) {
+  for (j in seq_len(ncol(pval_matrix))) {
+    if (!is.na(pval_matrix[i, j])) {
+      comp <- paste(rownames(pval_matrix)[i], "vs", colnames(pval_matrix)[j])
+      comparisons <- c(comparisons, comp)
+      pvals <- c(pvals, pval_matrix[i, j])
+    }
+  }
+}
+
+# Crear dataframe
+posthoc_df <- data.frame(
+  Comparison = comparisons,
+  p.value = pvals
+)
+
+# Añadir columna de significancia
+posthoc_df$Significance <- cut(posthoc_df$p.value,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", "ns")
+)
+
+# Mostrar tabla
+print(posthoc_df)
+
+# (Opcional) Exportar
+# write.csv(posthoc_df, "pairwise_surface_phases.csv", row.names = FALSE)
+
+```
+
+#Ahora para Subsurface
+
+```{r}
+# ---------------------------
+# 📦 Cargar librerías necesarias
+# ---------------------------
+library(vegan)
+library(dplyr)
+
+# ---------------------------
+# 🧼 1. Preparar los datos
+# ---------------------------
+
+# Separar matrices
+env_bottom <- datos_bottom_filtrados[, 3:12]  # Variables ambientales
+lipids_bottom_raw <- datos_bottom_filtrados[, 13:ncol(datos_bottom_filtrados)]  # Lípidos + posibles extras
+phase_bottom <- datos_bottom_filtrados$typeset  # Fases
+
+# Eliminar columna "Depth" si está entre los lípidos
+lipids_bottom_raw <- lipids_bottom_raw[, !colnames(lipids_bottom_raw) %in% c("Depth")]
+
+# Convertir todo a numérico
+lipids_bottom_numeric <- as.data.frame(
+  lapply(lipids_bottom_raw, function(x) as.numeric(as.character(x)))
+)
+
+# ---------------------------
+# 🔍 2. Verificar y filtrar datos completos
+# ---------------------------
+
+# Filtrar filas completas (sin NA) en ambientales y lípidos
+complete_rows_bottom <- complete.cases(env_bottom, lipids_bottom_numeric)
+
+env_bottom_clean <- env_bottom[complete_rows_bottom, ]
+lipids_bottom_clean <- lipids_bottom_numeric[complete_rows_bottom, ]
+phase_bottom_clean <- droplevels(as.factor(phase_bottom[complete_rows_bottom]))
+
+# Mostrar cuántas fases quedaron
+cat("Fases disponibles después del filtrado:\n")
+print(table(phase_bottom_clean))
+
+# ---------------------------
+# 🧪 3. Ejecutar PERMANOVA
+# ---------------------------
+
+adonis_result_bottom <- adonis2(
+  lipids_bottom_clean ~ phase_bottom_clean,
+  method = "euclidean"
+)
+print(adonis_result_bottom)
+```
+
+```{r}
+library(RVAideMemoire)
+
+# Convertir a factor por si acaso
+phase_bottom_clean <- as.factor(phase_bottom_clean)
+
+# Post-hoc test entre fases
+posthoc_result_bottom <- pairwise.perm.manova(
+  dist(lipids_bottom_clean),
+  phase_bottom_clean,
+  nperm = 999
+)
+print(posthoc_result_bottom)
+```
+
+```{r}
+# Extraer matriz de p-valores
+pval_matrix_bottom <- posthoc_result_bottom$p.value
+
+# Inicializar vectores
+comparisons_bottom <- c()
+pvals_bottom <- c()
+
+# Recorrer la matriz triangular superior
+for (i in seq_len(nrow(pval_matrix_bottom))) {
+  for (j in seq_len(ncol(pval_matrix_bottom))) {
+    if (!is.na(pval_matrix_bottom[i, j])) {
+      comp <- paste(rownames(pval_matrix_bottom)[i], "vs", colnames(pval_matrix_bottom)[j])
+      comparisons_bottom <- c(comparisons_bottom, comp)
+      pvals_bottom <- c(pvals_bottom, pval_matrix_bottom[i, j])
+    }
+  }
+}
+
+# Crear dataframe
+posthoc_df_bottom <- data.frame(
+  Comparison = comparisons_bottom,
+  p.value = pvals_bottom
+)
+
+# Añadir significancia
+posthoc_df_bottom$Significance <- cut(posthoc_df_bottom$p.value,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", "ns")
+)
+
+# Mostrar tabla
+print(posthoc_df_bottom)
+
+# Exportar si quieres
+# write.csv(posthoc_df_bottom, "pairwise_bottom_phases.csv", row.names = FALSE)
+```
+
+#RESUMEN
+
+# PERMANOVA
+```{r}
+# Unir Surface y Bottom
+datos_surface_filtrados$Depth <- "Surface"
+datos_bottom_filtrados$Depth <- "Bottom"
+
+datos_total <- bind_rows(datos_surface_filtrados, datos_bottom_filtrados)
+
+# Extraer lípidos y quitar "Depth" si se coló
+lipids_total_raw <- datos_total[, 13:ncol(datos_total)]
+lipids_total_raw <- lipids_total_raw[, !colnames(lipids_total_raw) %in% c("Depth")]
+
+# Convertir a numérico (con coerción explícita)
+lipids_total_numeric <- as.data.frame(
+  lapply(lipids_total_raw, function(x) as.numeric(as.character(x)))
+)
+
+# Eliminar columnas con NAs
+lipids_total_cleaned <- lipids_total_numeric[, colSums(is.na(lipids_total_numeric)) == 0]
+
+# Ahora filtrar filas completas
+complete_rows_total <- complete.cases(lipids_total_cleaned)
+lipids_total_clean <- lipids_total_cleaned[complete_rows_total, ]
+depth_factor_clean <- as.factor(datos_total$Depth[complete_rows_total])
+
+# Verificar cuántas muestras hay por grupo
+cat("✔️ Muestras por grupo (Depth):\n")
+print(table(depth_factor_clean))
+
+# Ejecutar PERMANOVA si hay 2 grupos
+if (length(unique(depth_factor_clean)) > 1) {
+  adonis_result_depth <- adonis2(lipids_total_clean ~ depth_factor_clean, method = "euclidean")
+  print(adonis_result_depth)
+} else {
+  cat("❌ No hay suficientes grupos para comparar Surface vs Bottom.\n")
+}
+```
+```{r}
+summary_df <- data.frame(
+  Comparison = c(
+    "Surface vs Bottom (Depth)",
+    "Phases in Surface",
+    "Surface: Phase2 vs Phase3",
+    "Surface: Phase2 vs Phase4",
+    "Surface: Phase1 vs Phase4",
+    "Phases in Bottom",
+    "Bottom: Phase4 vs Phase1",
+    "Bottom: Phase4 vs Phase2",
+    "Bottom: Phase4 vs Phase3"
+  ),
+  F_value = c(
+    7.2222,
+    5.5502,
+    NA, NA, NA,
+    11.639,
+    NA, NA, NA
+  ),
+  R_squared = c(
+    0.09353,
+    0.34225,
+    NA, NA, NA,
+    0.5218,
+    NA, NA, NA
+  ),
+  p_value = c(
+    0.001,
+    0.002,
+    0.003,
+    0.003,
+    0.046,
+    0.002,
+    0.032,
+    0.003,
+    0.003
+  ),
+  Significance = cut(
+    c(0.001, 0.002, 0.003, 0.003, 0.046, 0.002, 0.032, 0.003, 0.003),
+    breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+    labels = c("***", "**", "*", ".", "ns")
+  )
+)
+
+print(summary_df)
+```
+
+```{r}
+write.csv(summary_df, "RDA_summary_results.csv", row.names = FALSE)
+
+```
+
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+#                  el siguiente paso es plotear las variables ambientales con todos los 16S rRNA
+#-----------------------------------------------------------------------------------------------------------------------------------   
+
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Asegurarse de tener los datos cargados
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/merged_data_clean_M5_M6_ORDER_phases_final.csv")
+
+# Filtrar datos de superficie y fondo
+datos_surface <- datos_fusionados %>% filter(grepl("Surface", ID))
+datos_bottom  <- datos_fusionados %>% filter(grepl("Bottom", ID))
+```
+
+
+```{r}
+# Identificar columnas de órdenes bacterianas (de la 13 en adelante)
+ordenes_vars_surface <- 13:ncol(datos_surface)
+
+# Asegurar que son numéricas
+datos_surface[, ordenes_vars_surface] <- datos_surface[, ordenes_vars_surface] %>%
+  mutate(across(everything(), as.numeric))
+
+# Calcular suma total por orden
+suma_ordenes_surface <- colSums(datos_surface[, ordenes_vars_surface], na.rm = TRUE)
+
+# Filtrar las órdenes con suma > 20
+ordenes_seleccionadas_surface <- names(suma_ordenes_surface[suma_ordenes_surface > 4])
+ordenes_descartadas_surface <- names(suma_ordenes_surface[suma_ordenes_surface <= 4])
+
+# Conservar ID + variables ambientales (columnas 1:12) + órdenes seleccionadas
+datos_surface_filtrados <- bind_cols(
+  datos_surface[, 1:12],
+  datos_surface[, ordenes_seleccionadas_surface]
+)
+
+# Imprimir resumen
+cat("Órdenes seleccionadas (Surface):", length(ordenes_seleccionadas_surface), "\n")
+cat("Órdenes descartadas (Surface):", length(ordenes_descartadas_surface), "\n")
+```
+
+
+```{r}
+# Identificar columnas de órdenes bacterianas
+ordenes_vars_bottom <- 13:ncol(datos_bottom)
+
+# Asegurar que son numéricas
+datos_bottom[, ordenes_vars_bottom] <- datos_bottom[, ordenes_vars_bottom] %>%
+  mutate(across(everything(), as.numeric))
+
+# Calcular la suma total por orden
+suma_ordenes_bottom <- colSums(datos_bottom[, ordenes_vars_bottom], na.rm = TRUE)
+
+# Filtrar las órdenes con suma > 20
+ordenes_seleccionadas_bottom <- names(suma_ordenes_bottom[suma_ordenes_bottom > 4])
+ordenes_descartadas_bottom <- names(suma_ordenes_bottom[suma_ordenes_bottom <= 4])
+
+# Conservar ID + variables ambientales (columnas 1:12) + órdenes seleccionadas
+datos_bottom_filtrados <- bind_cols(
+  datos_bottom[, 1:12],
+  datos_bottom[, ordenes_seleccionadas_bottom]
+)
+
+# Imprimir resumen
+cat("Órdenes seleccionadas (Bottom):", length(ordenes_seleccionadas_bottom), "\n")
+cat("Órdenes descartadas (Bottom):", length(ordenes_descartadas_bottom), "\n")
+```
+
+
+
+```{r}
+plot_rda_scaled <- function(df, title_label) {
+  library(vegan)
+  library(ggplot2)
+  library(dplyr)
+  library(ggrepel)
+  library(scales)
+
+  # Separar variables ambientales y órdenes bacterianas
+  env_data <- df[, 3:12]
+  com_data <- df[, 13:ncol(df)]
+
+  # Filtrar filas completas
+  rows_complete <- complete.cases(env_data)
+  env_data_clean <- env_data[rows_complete, ]
+  com_data_clean <- com_data[rows_complete, ]
+  df_clean <- df[rows_complete, ]
+
+  # RDA
+  rda_model <- rda(com_data_clean ~ ., data = env_data_clean)
+
+  # Coordenadas de sitios
+  sites_df <- scores(rda_model, display = "sites", scaling = 2) %>% as.data.frame()
+  sites_df$ID <- df_clean$ID
+  sites_df$group <- df_clean$typeset
+  sites_df$Label <- gsub(".*Mesocosm ([0-9]+_Day_[0-9]+)", "M\\1", sites_df$ID)
+
+  # Orden de fases
+  sites_df$group <- factor(sites_df$group, levels = c("Phase1", "Phase2", "Phase3", "Phase4"))
+  colnames(sites_df)[1:2] <- c("RDA1", "RDA2")
+
+  # Variables ambientales
+  env_vectors <- scores(rda_model, display = "bp", scaling = 2)
+  env_df <- data.frame(
+    Variable = rownames(env_vectors),
+    RDA1 = env_vectors[, 1],
+    RDA2 = env_vectors[, 2]
+  )
+
+  # Escalar a [0, 1]
+  sites_df$RDA1 <- rescale(sites_df$RDA1)
+  sites_df$RDA2 <- rescale(sites_df$RDA2)
+  env_df$RDA1 <- rescale(env_df$RDA1)
+  env_df$RDA2 <- rescale(env_df$RDA2)
+
+  # Convex hulls
+  convex_hull_df <- sites_df %>%
+    group_by(group) %>%
+    slice(chull(RDA1, RDA2))
+
+  # Plot
+  p <- ggplot() +
+    geom_vline(xintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_hline(yintercept = 0.5, linetype = 2, color = "grey70") +
+    geom_polygon(data = convex_hull_df, 
+                 aes(x = RDA1, y = RDA2, group = group, fill = group, color = group), 
+                 alpha = 0.2) +
+    geom_point(data = sites_df, 
+               aes(x = RDA1, y = RDA2, color = group, shape = group), size = 4) +
+    geom_text_repel(data = sites_df, 
+                    aes(x = RDA1, y = RDA2, label = Label), 
+                    size = 2.5, max.overlaps = Inf) +
+    geom_segment(data = env_df, 
+                 aes(x = 0.5, y = 0.5, xend = RDA1, yend = RDA2), 
+                 arrow = arrow(length = unit(0.25, "cm")), color = "steelblue") +
+    geom_text_repel(data = env_df, 
+                    aes(x = RDA1, y = RDA2, label = Variable), 
+                    size = 4, color = "steelblue") +
+    labs(title = title_label, x = "Scaled RDA1", y = "Scaled RDA2") +
+    scale_color_manual(name = "Phase",
+                       values = c(
+                         "Phase1" = "#99002F",
+                         "Phase2" = "#FDBF6F",
+                         "Phase3" = "#A6CEE3",
+                         "Phase4" = "#1F78B4"
+                       )) +
+    scale_fill_manual(name = "Phase",
+                      values = c(
+                        "Phase1" = "#99002F",
+                        "Phase2" = "#FDBF6F",
+                        "Phase3" = "#A6CEE3",
+                        "Phase4" = "#1F78B4"
+                      )) +
+    scale_shape_manual(name = "Phase",
+                       values = c("Phase1" = 21, "Phase2" = 22, "Phase3" = 23, "Phase4" = 24)) +
+    theme_minimal() +
+    theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)) +
+    coord_fixed(xlim = c(0, 1), ylim = c(0, 1))
+
+  return(list(plot = p, model = rda_model, data = df_clean))
+}
+```
+
+```{r}
+resultado_surface_16S <- plot_rda_scaled(datos_surface_filtrados, "Surface")
+resultado_surface_16S$plot
+```
+
+```{r}
+resultado_bottom_16S <- plot_rda_scaled(datos_bottom_filtrados, "Subsurface")
+resultado_bottom_16S$plot
+```
+
+
+```{r}
+rda_surface_16S <- plot_rda_scaled(datos_surface_filtrados, "Surface")
+rda_surface_16S
+```
+
+```{r}
+rda_bottom_16S  <- plot_rda_scaled(datos_bottom_filtrados, "Subsurface")
+rda_bottom_16S
+```
+
+```{r}
+rda_surface_16S_model <- resultado_surface_16S$model
+rda_bottom_16S_model  <- resultado_bottom_16S$model
+```
+
+# sugerencia de Julio
+```{r}
+# --- Surface (16S) ---
+anova(rda_surface_16S_model, permutations = 999)
+anova(rda_surface_16S_model, by = "axis", permutations = 999)
+anova(rda_surface_16S_model, by = "margin", permutations = 999)
+RsquareAdj(rda_surface_16S_model)
+vif.cca(rda_surface_16S_model)
+```
+
+```{r}
+# --- Subsurface (16S) ---
+anova(rda_bottom_16S_model, permutations = 999)
+anova(rda_bottom_16S_model, by = "axis", permutations = 999)
+anova(rda_bottom_16S_model, by = "margin", permutations = 999)
+RsquareAdj(rda_bottom_16S_model)
+vif.cca(rda_bottom_16S_model)
+```
+
+
+
+```{r}
+library(patchwork)
+
+# Combinar en una figura vertical
+combined_16S_plot <- (rda_surface_16S / rda_bottom_16S) +
+  plot_annotation(
+    title = "16S rRNA – Bacterial Orders",
+    theme = theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+  )
+
+combined_16S_plot
+```
+
+# sugerencia de Julio
+
+
+
+
+
+#Analisis de PERMANOVA
+
+```{r}
+# Cargar paquetes necesarios
+library(vegan)
+library(RVAideMemoire)
+library(dplyr)
+
+# Leer archivo de datos
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/merged_data_clean_M5_M6_ORDER_phases_final.csv")
+
+# ------------------------- #
+# FUNCIONES AUXILIARES ---- #
+# ------------------------- #
+
+# PERMANOVA global
+crear_tabla_permanova <- function(layer, resultado) {
+  data.frame(
+    Layer = layer,
+    Test = "PERMANOVA",
+    Comparison = "All phases",
+    R2 = round(resultado$R2[1], 3),
+    F_value = round(resultado$F[1], 3),
+    p_value = round(resultado$`Pr(>F)`[1], 4),
+    Significance = ifelse(resultado$`Pr(>F)`[1] < 0.001, "***",
+                   ifelse(resultado$`Pr(>F)`[1] < 0.01, "**",
+                   ifelse(resultado$`Pr(>F)`[1] < 0.05, "*",
+                   ifelse(resultado$`Pr(>F)`[1] < 0.1, ".", "ns"))))
+  )
+}
+
+# Post-hoc (solo si hay datos válidos)
+crear_tabla_posthoc <- function(distancia, grupo, capa) {
+  posthoc <- pairwise.perm.manova(distancia, grupo, nperm = 999, p.method = "fdr")
+  pval_matrix <- as.matrix(posthoc$p.value)
+
+  if (is.null(rownames(pval_matrix)) || is.null(colnames(pval_matrix))) return(NULL)
+
+  comparisons <- c()
+  pvals <- c()
+
+  for (i in 1:(nrow(pval_matrix)-1)) {
+    for (j in (i+1):ncol(pval_matrix)) {
+      if (!is.na(pval_matrix[i, j])) {
+        comp_name <- paste(rownames(pval_matrix)[i], "vs", colnames(pval_matrix)[j])
+        comparisons <- c(comparisons, comp_name)
+        pvals <- c(pvals, as.numeric(pval_matrix[i, j]))
+      }
+    }
+  }
+
+  if (length(pvals) == 0) return(NULL)
+
+  sig <- cut(pvals,
+             breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+             labels = c("***", "**", "*", ".", "ns"))
+
+  tabla_posthoc <- data.frame(
+    Layer = capa,
+    Test = "Pairwise",
+    Comparison = comparisons,
+    R2 = NA,
+    F_value = NA,
+    p_value = round(pvals, 4),
+    Significance = sig
+  )
+
+  return(tabla_posthoc)
+}
+
+# ------------------------- #
+# ANÁLISIS SURFACE -------- #
+# ------------------------- #
+
+datos_surface <- datos_fusionados %>% filter(grepl("Surface", ID))
+grupo_surface <- as.factor(datos_surface$typeset)
+dist_surface <- dist(datos_surface[, 13:ncol(datos_surface)], method = "euclidean")
+permanova_surface <- adonis2(datos_surface[, 13:ncol(datos_surface)] ~ grupo_surface, method = "euclidean", permutations = 999)
+
+tabla_global_surface <- crear_tabla_permanova("Surface", permanova_surface)
+tabla_posthoc_surface <- crear_tabla_posthoc(dist_surface, grupo_surface, "Surface")
+
+# ------------------------- #
+# ANÁLISIS SUBSURFACE ----- #
+# ------------------------- #
+
+datos_bottom <- datos_fusionados %>% filter(grepl("Bottom", ID))
+grupo_bottom <- as.factor(datos_bottom$typeset)
+dist_bottom <- dist(datos_bottom[, 13:ncol(datos_bottom)], method = "euclidean")
+permanova_bottom <- adonis2(datos_bottom[, 13:ncol(datos_bottom)] ~ grupo_bottom, method = "euclidean", permutations = 999)
+
+tabla_global_bottom <- crear_tabla_permanova("Subsurface", permanova_bottom)
+
+# ------------------------- #
+# UNIR Y EXPORTAR ---------- #
+# ------------------------- #
+
+tabla_final <- bind_rows(
+  tabla_global_surface,
+  tabla_posthoc_surface,
+  tabla_global_bottom
+)
+
+write.csv(tabla_final, "tabla_16S_surface_subsurface_final.csv", row.names = FALSE)
+```
+
+
+# Ahora vamos a hacer las abundancias relativas por fases y Mescocosms
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(RColorBrewer)
+
+# --- Paso 1: Relativizar ---
+ordenes_surface <- datos_surface[, 13:ncol(datos_surface)]
+ordenes_surface_rel <- ordenes_surface / rowSums(ordenes_surface, na.rm = TRUE)
+
+# Metadata
+ordenes_surface_rel$ID <- datos_surface$ID
+ordenes_surface_rel$Mesocosm <- gsub(".*Mesocosm ([0-9]+_Day_[0-9]+)", "M\\1", datos_surface$ID)
+ordenes_surface_rel$Phase <- datos_surface$typeset
+ordenes_surface_rel$Grupo <- ifelse(grepl("Mesocosm 5", datos_surface$ID), "M5", "M6")
+
+# --- Paso 2: Formato largo + top 27 órdenes ---
+ordenes_long <- ordenes_surface_rel %>%
+  pivot_longer(
+    cols = -c(ID, Mesocosm, Phase, Grupo),
+    names_to = "Orden",
+    values_to = "AbundanciaRelativa"
+  )
+
+# Top 27 órdenes
+ordenes_top <- ordenes_long %>%
+  group_by(Orden) %>%
+  summarise(Total = sum(AbundanciaRelativa, na.rm = TRUE)) %>%
+  top_n(27, Total) %>%
+  pull(Orden)
+
+ordenes_long <- ordenes_long %>%
+  mutate(Orden = ifelse(Orden %in% ordenes_top, Orden, "Others"))
+
+# Reordenar factores
+ordenes_long$Orden <- fct_reorder(ordenes_long$Orden, ordenes_long$AbundanciaRelativa, .fun = sum, .desc = TRUE)
+ordenes_long$Mesocosm <- factor(ordenes_long$Mesocosm)
+
+# --- Paso 3: Paleta extendida RdGy ---
+num_colores <- length(unique(ordenes_long$Orden))
+palette_rdgy_extended <- colorRampPalette(brewer.pal(11, "RdGy"))(num_colores)
+
+# --- Paso 4: Gráfico final ---
+ggplot(ordenes_long, aes(x = Mesocosm, y = AbundanciaRelativa, fill = Orden)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~Grupo, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(name = "Order", values = palette_rdgy_extended) +
+  labs(
+    title = "Relative Abundance of Bacterial Orders – Surface",
+    x = "Mesocosm",
+    y = "Relative Abundance"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 12, face = "bold")
+  )
+```
+
+```{r}
+# --- Paso 1: Relativizar ---
+ordenes_bottom <- datos_bottom[, 13:ncol(datos_bottom)]
+ordenes_bottom_rel <- ordenes_bottom / rowSums(ordenes_bottom, na.rm = TRUE)
+
+# Metadata
+ordenes_bottom_rel$ID <- datos_bottom$ID
+ordenes_bottom_rel$Mesocosm <- gsub(".*Mesocosm ([0-9]+_Day_[0-9]+)", "M\\1", datos_bottom$ID)
+ordenes_bottom_rel$Phase <- datos_bottom$typeset
+ordenes_bottom_rel$Grupo <- ifelse(grepl("Mesocosm 5", datos_bottom$ID), "M5", "M6")
+
+# --- Paso 2: Formato largo + top 27 órdenes (mismos que Surface para comparación) ---
+ordenes_long_bottom <- ordenes_bottom_rel %>%
+  pivot_longer(
+    cols = -c(ID, Mesocosm, Phase, Grupo),
+    names_to = "Orden",
+    values_to = "AbundanciaRelativa"
+  )
+
+# Usar las mismas órdenes top que en Surface
+ordenes_long_bottom <- ordenes_long_bottom %>%
+  mutate(Orden = ifelse(Orden %in% ordenes_top, Orden, "Others"))
+
+# Reordenar factores
+ordenes_long_bottom$Orden <- fct_relevel(ordenes_long_bottom$Orden, levels(unique(ordenes_long$Orden)))
+ordenes_long_bottom$Mesocosm <- factor(ordenes_long_bottom$Mesocosm)
+
+# --- Paso 3: Paleta extendida RdGy (reutilizar la misma)
+# ya definida como: palette_rdgy_extended
+
+# --- Paso 4: Gráfico final ---
+ggplot(ordenes_long_bottom, aes(x = Mesocosm, y = AbundanciaRelativa, fill = Orden)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~Grupo, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(name = "Order", values = palette_rdgy_extended) +
+  labs(
+    title = "Relative Abundance of Bacterial Orders – Subsurface",
+    x = "Mesocosm",
+    y = "Relative Abundance"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 12, face = "bold")
+  )
+```
+```{r}
+# Guardar los gráficos individuales (si no lo hiciste antes)
+plot_surface <- ggplot(ordenes_long, aes(x = Mesocosm, y = AbundanciaRelativa, fill = Orden)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~Grupo, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(name = "Order", values = palette_rdgy_extended) +
+  labs(
+    title = "Relative Abundance of Bacterial Orders – Surface",
+    x = "Mesocosm",
+    y = "Relative Abundance"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(size = 12, face = "bold"))
+
+plot_subsurface <- ggplot(ordenes_long_bottom, aes(x = Mesocosm, y = AbundanciaRelativa, fill = Orden)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~Grupo, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(name = "Order", values = palette_rdgy_extended) +
+  labs(
+    title = "Relative Abundance of Bacterial Orders – Subsurface",
+    x = "Mesocosm",
+    y = "Relative Abundance"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(size = 12, face = "bold"))
+```
+
+```{r}
+library(patchwork)
+
+# Combinar verticalmente
+combined_orders_plot <- plot_surface / plot_subsurface +
+  plot_annotation(
+    title = "Taxonomic Composition by Mesocosm and Depth (16S rRNA)",
+    theme = theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+  )
+
+# Mostrar el gráfico combinado
+combined_orders_plot
+```
+
+
+#Ahora actualicemos la abundancia relativa de los IPLs
+
+
+```{r}
+# Cargar paquetes necesarios
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(stringr)
+
+# ---- 1. Cargar datos y separar Surface / Bottom ----
+# Asegurarse de tener los datos cargados
+datos <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/combined_data_only_IPL_envriomental.csv")
+
+datos_surface <- datos %>% filter(grepl("Surface", ID))
+datos_bottom  <- datos %>% filter(grepl("Bottom", ID))
+
+# ---- 2. Función para filtrar, clasificar y transformar ----
+procesar_datos <- function(df) {
+  lipid_cols <- 13:ncol(df)
+  df[, lipid_cols] <- mutate(df[, lipid_cols], across(everything(), as.numeric))
+  
+  suma_lipidos <- colSums(df[, lipid_cols], na.rm = TRUE)
+  lipidos_filtrados <- names(suma_lipidos[suma_lipidos > 20])
+  
+  df_filtrado <- bind_cols(df[, 1:12], df[, lipidos_filtrados])
+  
+  # Pivot a largo
+  df_largo <- df_filtrado %>%
+    pivot_longer(cols = all_of(lipidos_filtrados), names_to = "Lipido", values_to = "Abundancia") %>%
+    
+    # Asignar clase
+    mutate(
+      Clase = case_when(
+        str_starts(Lipido, regex("PG|PE|PC|PME|PDME", ignore_case = TRUE)) ~ "Phospholipids",
+        str_starts(Lipido, regex("MGDG|DGDG|SQDG", ignore_case = TRUE)) ~ "Glycolipids",
+        str_starts(Lipido, regex("DGTA|DGTS|DGCC", ignore_case = TRUE)) ~ "Betaine lipids",
+        TRUE ~ "Otros"
+      )
+    ) %>%
+    filter(Clase != "Otros")  # Filtrar solo los 3 grupos principales
+  
+  # Obtener Mesocosm
+  df_largo <- df_largo %>%
+    mutate(
+      Mesocosm = case_when(
+        str_detect(ID, "Mesocosm 5") ~ "M5",
+        str_detect(ID, "Mesocosm 6") ~ "M6",
+        str_detect(ID, "Mesocosm 7") ~ "M7",
+        str_detect(ID, "Mesocosm 8") ~ "M8",
+        TRUE ~ NA_character_
+      ),
+      Grupo = case_when(
+        Mesocosm %in% c("M5", "M8") ~ "M5_M8",
+        Mesocosm %in% c("M6", "M7") ~ "M6_M7",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    drop_na(Mesocosm)
+  
+  # Calcular abundancia relativa por clase y muestra
+  df_rel <- df_largo %>%
+    group_by(ID, Clase) %>%
+    mutate(AbundanciaRelativa = Abundancia / sum(Abundancia, na.rm = TRUE)) %>%
+    ungroup()
+  
+  return(df_rel)
+}
+
+# ---- 3. Aplicar función ----
+surface_rel <- procesar_datos(datos_surface) %>%
+  mutate(Profundidad = "Surface")
+
+bottom_rel <- procesar_datos(datos_bottom) %>%
+  mutate(Profundidad = "Subsurface")
+```
+
+```{r}
+# ---- 4. Unir Surface y Bottom, extraer info útil ----
+lipidos_relativos <- bind_rows(surface_rel, bottom_rel) %>%
+  mutate(
+    Day = as.integer(str_extract(ID, "(?<=Day_)[0-9]+")),
+    DayLabel = paste0("Day_", Day),
+    Clase = factor(Clase, levels = c("Phospholipids", "Glycolipids", "Betaine lipids")),
+    Profundidad = factor(Profundidad, levels = c("Surface", "Subsurface")),
+    Mesocosm = factor(Mesocosm, levels = c("M5", "M8", "M6", "M7"))
+  )
+```
+
+
+```{r}
+plot_por_clase <- function(data, clase) {
+  data_clase <- data %>% filter(Clase == clase)
+  
+  # Paleta base por clase
+  paleta_base <- case_when(
+    clase == "Phospholipids" ~ "RdGy",
+    clase == "Glycolipids" ~ "RdBu",
+    clase == "Betaine lipids" ~ "Spectral",
+    TRUE ~ "Set3"
+  )
+  
+  # Ordenar lípidos por nombre
+  lipidos_ordenados <- sort(unique(data_clase$Lipido))
+  n <- length(lipidos_ordenados)
+  
+  # Paleta gradiente para lípidos
+  max_colores <- max(brewer.pal.info[paleta_base, "maxcolors"], na.rm = TRUE)
+  paleta_gradiente <- setNames(colorRampPalette(brewer.pal(max_colores, paleta_base))(n), lipidos_ordenados)
+  
+  ggplot(data_clase, aes(x = DayLabel, y = AbundanciaRelativa, fill = Lipido)) +
+    geom_bar(stat = "identity", position = "stack") +
+    facet_grid(Profundidad ~ Mesocosm, scales = "free_x", space = "free_x") +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    scale_fill_manual(values = paleta_gradiente, name = "Lipid") +
+    labs(
+      title = clase,
+      x = "Day",
+      y = "Relative Abundance (%)"
+    ) +
+    theme_minimal() +
+    theme(
+  axis.text.x = element_text(angle = 90, size = 7, vjust = 0.5, hjust = 1),
+  strip.text = element_text(face = "bold"),
+  legend.position = "right",
+  panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+)
+}
+```
+
+```{r}
+# Mostrar cada clase
+print(plot_por_clase(lipidos_relativos, "Phospholipids"))
+print(plot_por_clase(lipidos_relativos, "Glycolipids"))
+print(plot_por_clase(lipidos_relativos, "Betaine lipids"))
+```
+
+
+
+
+
+
+

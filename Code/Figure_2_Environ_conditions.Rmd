@@ -1,0 +1,2040 @@
+---
+title: "Enviromental_data"
+author: "Edgart Flores"
+date: "10/24/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(tidyverse) # conjunto de librerias
+library(readr)
+library(readxl)
+library(openxlsx)
+library(dplyr)
+library(RColorBrewer)
+library(tidyr)
+library(ggthemes)
+#library(ggarrange)
+```
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(gridExtra)
+library(readr)
+library(tidyverse)
+library(latex2exp)
+library(readxl)
+library(here) 
+library(broom)
+library(ggplot2)
+library(RColorBrewer)
+library(scales)
+library(reshape2)
+library(dendextend)
+library(cowplot)
+library(ggdendro)
+library(graphics)
+library(vegan)
+library(pvclust)
+library(cluster)
+library(factoextra)
+library(magrittr)
+library(janitor)
+library(ade4) 
+#library(adespatial) 
+library(gclus) 
+library(cluster) 
+library(FD)
+library(ggpubr)
+require(reshape2)
+library(dplyr) 
+library(devtools)
+library(ggpmisc)
+library(multcompView)
+library(ggsci)
+library(patchwork)
+``` 
+
+```{r cars}
+#e_data <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/environment_data.csv")
+e_data <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/full_nutrients_final.csv")
+```
+
+#remover Pacific
+```{r cars}
+e_data <- subset(e_data, ID != "Pacific")
+e_data <- subset(e_data, select = -N_star)
+e_data <- na.omit(e_data)
+```
+
+```{r cars}
+# Crear una nueva columna "typeset3" basada en la columna "ID"
+e_data$typeset3 <- sub(".*Mesocosm (\\d+)_.*", "Mesocosm \\1", e_data$ID)
+
+# Verificar la estructura actual de e_data
+head(e_data)
+```
+
+```{r pressure, echo=FALSE}
+# Crear una nueva columna "typeset2" basada en la columna "ID"
+e_data$typeset2 <- ifelse(grepl("^Surface", e_data$ID), "Surface", 
+                          ifelse(grepl("^Bottom", e_data$ID), "Subsurface", NA))
+
+# Imprimir el dataframe para verificar los cambios
+print(e_data)
+```
+
+```{r}
+e_data <- e_data[, c("Day", "typeset2", "typeset3", names(e_data)[!names(e_data) %in% c("Day", "typeset2", "typeset3")])]
+```
+
+# Harry agree 31.999 look this
+```{r}
+e_data$O2 <- e_data$O2 * 31.24986 # transformar de ml.L a umol/Kg o simplemente uM.
+```
+
+
+```{r}
+ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2"), size = 1) +
+  geom_line(aes(y = pH, color = "pH"), size = 1) +
+  facet_grid(typeset2 ~ ., scales = "free", switch = "y") +
+  ylab("O2") +
+  xlab("Day") +
+  scale_y_continuous(sec.axis = sec_axis(~ ., name = "pH"))
+```
+
+
+
+```{r}
+scaleFactor <- max(e_data$pH) / max(e_data$O2)
+
+ggplot(e_data, aes(x=Day)) +
+  geom_smooth(aes(y=pH), method="loess", col="blue") +
+  geom_smooth(aes(y=O2 * scaleFactor), method="loess", col="red") +
+  scale_y_continuous(name="pH", sec.axis=sec_axis(~./scaleFactor, name="O2")) +
+  #ylim(7.4, 8.2) +
+  theme(
+    axis.title.y.left=element_text(color="blue"),
+    axis.text.y.left=element_text(color="blue"),
+    axis.title.y.right=element_text(color="red"),
+    axis.text.y.right=element_text(color="red")
+  )
+```
+
+
+# Plot O2 y pH 
+```{r}
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$O2)   # Specify max of first y axis
+max_second <- max(e_data$pH) # Specify max of second y axis
+min_first  <- min(e_data$O2)   # Specify min of first y axis
+min_second <- min(e_data$pH) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day, y = O2)) +
+  geom_line(aes(color = "Dissolved oxygen (umol/kg)")) +
+  facet_grid(typeset2 ~ ., scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  scale_x_continuous(breaks = seq(0, 300, 50)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name="pH")) +
+  labs(x = "Time (Day)", y = "Dissolved oxygen", color = "") +
+  scale_color_manual(values = c("orange2", "gray30"))
+
+print(pkpd)
+```
+
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day, y = O2)) +
+  geom_line(aes(color = "Dissolved oxygen (umol/kg)")) +
+  facet_wrap(~ typeset3, scales = "free", nrow = 1) +
+  geom_line(aes(x = Day, y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  scale_x_continuous(breaks = seq(0, 300, 50)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name="pH")) +
+  labs(x = "Time (Day)", y = "Dissolved oxygen", color = "") +
+  scale_color_manual(values = c("orange2", "gray30"))
+
+print(pkpd)
+```
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day, y = O2)) +
+  geom_line(aes(color = "Dissolved oxygen (umol/kg)")) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  scale_x_continuous(breaks = seq(0, 300, 50)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name="pH")) +
+  labs(x = "Time (Day)", y = "Dissolved oxygen", color = "") +
+  scale_color_manual(values = c("orange2", "gray30"))
+
+print(pkpd)
+```
+
+
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale, shift), shape = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 300, 10), labels = seq(0, 300, 10)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "pH")) +
+  labs(x = "Time (Day)", y = "Dissolved oxygen (μmol/Kg)", color = "", shape = "") +
+  scale_color_manual(values = c("orange2", "gray30")) +
+  scale_shape_manual(values = c(16, 17))
+
+print(pkpd)
+```
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale, shift), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 300, 10), labels = seq(0, 300, 10)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "pH")) +
+  labs(x = "Days)", y = "Dissolved oxygen (μmol/Kg)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "lightsalmon2", "pH" = "lightsteelblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17))
+
+print(pkpd)
+```
+```{r}
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale, shift), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 200, 50), labels = seq(0, 200, 50)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(pkpd)
+```
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+e_data <- e_data %>%
+  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+# Luego procedes con tu código de visualización
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale, shift), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 200, 50), labels = seq(0, 200, 50)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(pkpd)
+```
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+e_data <- e_data %>%
+  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+# Luego procedes con tu código de visualización
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(pH, scale, shift), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale, shift), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +  # Establece los límites del eje x
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) #+
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje x
+
+print(pkpd)
+```
+
+# new line to change the range 
+```{r}
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Definir límites específicos para cada capa
+max_first_surface  <- max(e_data$O2[e_data$typeset2 == "Surface"])
+min_first_surface  <- min(e_data$O2[e_data$typeset2 == "Surface"])
+max_second_surface <- max(e_data$pH[e_data$typeset2 == "Surface"])
+min_second_surface <- min(e_data$pH[e_data$typeset2 == "Surface"])
+
+max_first_subsurface  <- max(e_data$O2[e_data$typeset2 == "Subsurface"])
+min_first_subsurface  <- min(e_data$O2[e_data$typeset2 == "Subsurface"])
+max_second_subsurface <- max(e_data$pH[e_data$typeset2 == "Subsurface"])
+min_second_subsurface <- min(e_data$pH[e_data$typeset2 == "Subsurface"])
+
+# Funciones de escala y ajuste para cada capa
+scale_surface <- (max_second_surface - min_second_surface) / (max_first_surface - min_first_surface)
+shift_surface <- min_second_surface - min_first_surface * scale_surface
+
+scale_subsurface <- (max_second_subsurface - min_second_subsurface) / (max_first_subsurface - min_first_subsurface)
+shift_subsurface <- min_second_subsurface - min_first_subsurface * scale_subsurface
+
+# Crear gráfico para Surface
+plot_surface <- ggplot(e_data %>% filter(typeset2 == "Surface"), aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_wrap(~typeset3, scales = "free") +
+  geom_line(aes(y = inv_scale_function(pH, scale_surface, shift_surface), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale_surface, shift_surface), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_surface, max_first_surface), sec.axis = sec_axis(~scale_function(., scale_surface, shift_surface), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Crear gráfico para Subsurface
+plot_subsurface <- ggplot(e_data %>% filter(typeset2 == "Subsurface"), aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_wrap(~typeset3, scales = "free") +
+  geom_line(aes(y = inv_scale_function(pH, scale_subsurface, shift_subsurface), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale_subsurface, shift_subsurface), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_subsurface, max_first_subsurface), sec.axis = sec_axis(~scale_function(., scale_subsurface, shift_subsurface), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Combinar gráficos
+pkpd_combined <- plot_surface / plot_subsurface
+print(pkpd_combined)
+```
+
+
+
+
+```{r}
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Definir límites específicos para cada capa
+max_first_surface  <- max(e_data$O2[e_data$typeset2 == "Surface"])
+min_first_surface  <- min(e_data$O2[e_data$typeset2 == "Surface"])
+max_second_surface <- max(e_data$pH[e_data$typeset2 == "Surface"])
+min_second_surface <- min(e_data$pH[e_data$typeset2 == "Surface"])
+
+max_first_subsurface  <- max(e_data$O2[e_data$typeset2 == "Subsurface"])
+min_first_subsurface  <- min(e_data$O2[e_data$typeset2 == "Subsurface"])
+max_second_subsurface <- max(e_data$pH[e_data$typeset2 == "Subsurface"])
+min_second_subsurface <- min(e_data$pH[e_data$typeset2 == "Subsurface"])
+
+# Funciones de escala y ajuste para cada capa
+scale_surface <- (max_second_surface - min_second_surface) / (max_first_surface - min_first_surface)
+shift_surface <- min_second_surface - min_first_surface * scale_surface
+
+scale_subsurface <- (max_second_subsurface - min_second_subsurface) / (max_first_subsurface - min_first_subsurface)
+shift_subsurface <- min_second_subsurface - min_first_subsurface * scale_subsurface
+
+# Crear gráfico para Surface
+plot_surface <- ggplot(e_data %>% filter(typeset2 == "Surface"), aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_wrap(~typeset3, ncol = 4) +
+  geom_line(aes(y = inv_scale_function(pH, scale_surface, shift_surface), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale_surface, shift_surface), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_surface, max_first_surface), sec.axis = sec_axis(~scale_function(., scale_surface, shift_surface), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Crear gráfico para Subsurface
+plot_subsurface <- ggplot(e_data %>% filter(typeset2 == "Subsurface"), aes(x = Day)) +
+  geom_line(aes(y = O2, color = "O2")) +
+  geom_point(aes(y = O2, shape = "O2", color = "O2"), size = 3) +
+  facet_wrap(~typeset3, ncol = 4) +
+  geom_line(aes(y = inv_scale_function(pH, scale_subsurface, shift_subsurface), color = "pH")) +
+  geom_point(aes(y = inv_scale_function(pH, scale_subsurface, shift_subsurface), shape = "pH", color = "pH"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_subsurface, max_first_subsurface), sec.axis = sec_axis(~scale_function(., scale_subsurface, shift_subsurface), name = "pH")) +
+  labs(x = "Days", y = "Dissolved oxygen (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_shape_manual(values = c("O2" = 16, "pH" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Combinar gráficos
+pkpd_combined <- plot_surface / plot_subsurface
+print(pkpd_combined)
+```
+# Pool treatments, since there are no statistically significant differences between them
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Calcular promedios por Day y typeset2
+averaged_data <- e_data %>%
+  group_by(Day, typeset2) %>%
+  summarise(
+    O2_mean = mean(O2, na.rm = TRUE),
+    pH_mean = mean(pH, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  filter(!is.na(O2_mean) & !is.na(pH_mean))
+
+# Separar datos por profundidad
+surface_data <- averaged_data %>% filter(typeset2 == "Surface")
+subsurface_data <- averaged_data %>% filter(typeset2 == "Subsurface")
+
+# Función para escalar datos
+scale_to_range <- function(x, new_min, new_max) {
+  old_min <- min(x, na.rm = TRUE)
+  old_max <- max(x, na.rm = TRUE)
+  (x - old_min) / (old_max - old_min) * (new_max - new_min) + new_min
+}
+
+# Función para convertir de vuelta
+unscale_from_range <- function(x, original_min, original_max, scaled_min, scaled_max) {
+  (x - scaled_min) / (scaled_max - scaled_min) * (original_max - original_min) + original_min
+}
+
+# Para Surface
+O2_range_surface <- range(surface_data$O2_mean, na.rm = TRUE)
+pH_range_surface <- range(surface_data$pH_mean, na.rm = TRUE)
+surface_data$pH_scaled <- scale_to_range(surface_data$pH_mean, O2_range_surface[1], O2_range_surface[2])
+
+# Para Subsurface
+O2_range_subsurface <- range(subsurface_data$O2_mean, na.rm = TRUE)
+pH_range_subsurface <- range(subsurface_data$pH_mean, na.rm = TRUE)
+subsurface_data$pH_scaled <- scale_to_range(subsurface_data$pH_mean, O2_range_subsurface[1], O2_range_subsurface[2])
+
+# Crear gráfico para Surface
+plot_surface <- ggplot(surface_data, aes(x = Day)) +
+  geom_smooth(aes(y = O2_mean, color = "O2"), method = "loess", se = TRUE, span = 0.4) +
+  geom_smooth(aes(y = pH_scaled, color = "pH"), method = "loess", se = TRUE, span = 0.4) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(
+    name = "Dissolved oxygen (μmol/L)",
+    limits = O2_range_surface,
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., pH_range_surface[1], pH_range_surface[2], O2_range_surface[1], O2_range_surface[2]),
+      name = "pH"
+    )
+  ) +
+  labs(x = "Days", title = "Surface", color = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# Crear gráfico para Subsurface con mayor suavizado
+plot_subsurface <- ggplot(subsurface_data, aes(x = Day)) +
+  geom_smooth(aes(y = O2_mean, color = "O2"), method = "gam", formula = y ~ s(x, k = 8, bs = "cs"), se = TRUE, level = 0.95) +
+  geom_smooth(aes(y = pH_scaled, color = "pH"), method = "gam", formula = y ~ s(x, k = 8, bs = "cs"), se = TRUE, level = 0.95) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(
+    name = "Dissolved oxygen (μmol/L)",
+    limits = O2_range_subsurface,
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., pH_range_subsurface[1], pH_range_subsurface[2], O2_range_subsurface[1], O2_range_subsurface[2]),
+      name = "pH"
+    )
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# Combinar gráficos
+combined_plot <- plot_surface / plot_subsurface
+print(combined_plot)
+
+# Mostrar rangos para verificación
+cat("Surface - O2 range:", O2_range_surface, "\n")
+cat("Surface - pH range:", pH_range_surface, "\n")
+cat("Subsurface - O2 range:", O2_range_subsurface, "\n")
+cat("Subsurface - pH range:", pH_range_subsurface, "\n")
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+library(mgcv)
+
+# --- Función para interpolar suavemente ---
+interpolate_smooth <- function(data, xvar, yvar, method = "gam", k = 8) {
+  form <- as.formula(paste(yvar, "~ s(", xvar, ", k=", k, ", bs='cs')"))
+  fit <- gam(form, data = data)
+  
+  # Crear una secuencia completa de días
+  newx <- data.frame(Day = seq(min(data[[xvar]]), max(data[[xvar]]), by = 1))
+  pred <- predict(fit, newdata = newx, se.fit = TRUE)
+  
+  tibble(
+    Day = newx$Day,
+    fit = pred$fit,
+    lwr = pred$fit - 1.96 * pred$se.fit,
+    upr = pred$fit + 1.96 * pred$se.fit
+  )
+}
+
+# --- Para Surface ---
+surface_O2 <- interpolate_smooth(surface_data, "Day", "O2_mean")
+surface_pH <- interpolate_smooth(surface_data, "Day", "pH_scaled")
+
+plot_surface <- ggplot() +
+  geom_ribbon(data = surface_O2, aes(x = Day, ymin = lwr, ymax = upr), fill = "red", alpha = 0.2) +
+  geom_line(data = surface_O2, aes(x = Day, y = fit, color = "O2"), size = 1) +
+  geom_ribbon(data = surface_pH, aes(x = Day, ymin = lwr, ymax = upr), fill = "deepskyblue4", alpha = 0.2) +
+  geom_line(data = surface_pH, aes(x = Day, y = fit, color = "pH"), size = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10)) +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  labs(title = "Surface", x = "Days", y = "Dissolved oxygen (μmol/L)", color = "") +
+  theme_minimal()
+
+# --- Para Subsurface ---
+subsurface_O2 <- interpolate_smooth(subsurface_data, "Day", "O2_mean")
+subsurface_pH <- interpolate_smooth(subsurface_data, "Day", "pH_scaled")
+
+plot_subsurface <- ggplot() +
+  geom_ribbon(data = subsurface_O2, aes(x = Day, ymin = lwr, ymax = upr), fill = "red", alpha = 0.2) +
+  geom_line(data = subsurface_O2, aes(x = Day, y = fit, color = "O2"), size = 1) +
+  geom_ribbon(data = subsurface_pH, aes(x = Day, ymin = lwr, ymax = upr), fill = "deepskyblue4", alpha = 0.2) +
+  geom_line(data = subsurface_pH, aes(x = Day, y = fit, color = "pH"), size = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10)) +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  labs(title = "Subsurface", x = "Days", y = "Dissolved oxygen (μmol/L)", color = "") +
+  theme_minimal()
+
+# --- Mostrar ---
+library(patchwork)
+plot_surface / plot_subsurface
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+library(mgcv)
+library(patchwork)
+
+# --- Función para interpolar suavemente con GAM ---
+interpolate_smooth <- function(data, xvar, yvar, k = 25, step = 0.1) {
+  # Filtrar NA
+  data <- data %>% filter(!is.na(.data[[xvar]]), !is.na(.data[[yvar]]))
+  
+  # Evitar error si no hay datos
+  if(nrow(data) < 2) return(NULL)
+  
+  # Ajuste GAM
+  form <- as.formula(paste(yvar, "~ s(", xvar, ", k=", k, ", bs='tp')"))
+  fit <- gam(form, data = data)
+  
+  # Predicción
+  newx <- data.frame(Day = seq(0, 50, by = step))
+  pred <- predict(fit, newdata = newx, se.fit = TRUE)
+  
+  tibble(
+    Day = newx$Day,
+    fit = pred$fit,
+    lwr = pred$fit - 1.96 * pred$se.fit,
+    upr = pred$fit + 1.96 * pred$se.fit
+  )
+}
+
+# --- Función para plotear capa (Surface/Subsurface) ---
+plot_layer <- function(data, title) {
+  # Rango O2 y pH
+  O2_range <- range(data$O2_mean, na.rm = TRUE)
+  pH_range <- range(data$pH_mean, na.rm = TRUE)
+  
+  # Predicciones GAM
+  O2_smooth <- interpolate_smooth(data, "Day", "O2_mean")
+  pH_smooth <- interpolate_smooth(data, "Day", "pH_mean")
+  
+  # Escalar pH al rango de O2
+  scale_pH_to_O2 <- function(x) {
+    (x - min(pH_range)) / (max(pH_range) - min(pH_range)) * (max(O2_range) - min(O2_range)) + min(O2_range)
+  }
+  unscale_O2_to_pH <- function(x) {
+    (x - min(O2_range)) / (max(O2_range) - min(O2_range)) * (max(pH_range) - min(pH_range)) + min(pH_range)
+  }
+  
+  # Plot
+  ggplot() +
+    # Barras de error O2
+    {if(!is.null(O2_smooth)) geom_ribbon(data = O2_smooth, aes(x = Day, ymin = lwr, ymax = upr), fill = "red", alpha = 0.2)} +
+    # Línea O2
+    {if(!is.null(O2_smooth)) geom_line(data = O2_smooth, aes(x = Day, y = fit, color = "O2"), size = 1)} +
+    # Barras de error pH
+    {if(!is.null(pH_smooth)) geom_ribbon(data = pH_smooth, aes(x = Day, ymin = scale_pH_to_O2(lwr), ymax = scale_pH_to_O2(upr)), 
+                fill = "deepskyblue4", alpha = 0.2)} +
+    # Línea pH
+    {if(!is.null(pH_smooth)) geom_line(data = pH_smooth, aes(x = Day, y = scale_pH_to_O2(fit), color = "pH"), size = 1)} +
+    # Escalas
+    scale_x_continuous(name = "Days", limits = c(0, 50), breaks = seq(0, 50, 10)) +
+    scale_y_continuous(
+      name = "Dissolved oxygen (μmol/L)",
+      limits = O2_range,
+      sec.axis = sec_axis(~unscale_O2_to_pH(.), name = "pH")
+    ) +
+    scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+    labs(title = title, color = "") +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white", color = "black"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# --- Generar plots ---
+plot_surface <- plot_layer(surface_data, "Surface")
+plot_subsurface <- plot_layer(subsurface_data, "Subsurface")
+
+# --- Combinar plots ---
+plot_surface / plot_subsurface
+```
+# definitivo para el paper
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# --- Calcular promedio y SD por Day y typeset2 ---
+o2_data <- e_data %>%
+  filter(!is.na(O2)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(O2_mean = mean(O2, na.rm = TRUE),
+            O2_sd   = sd(O2, na.rm = TRUE),
+            .groups = 'drop') %>%
+  mutate(O2_sd = ifelse(is.na(O2_sd), 0, O2_sd)) # si n=1, sd=NA -> 0
+
+pH_data <- e_data %>%
+  filter(!is.na(pH)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(pH_mean = mean(pH, na.rm = TRUE),
+            pH_sd   = sd(pH, na.rm = TRUE),
+            .groups = 'drop') %>%
+  mutate(pH_sd = ifelse(is.na(pH_sd), 0, pH_sd))
+
+# Separar por profundidad
+surface_O2    <- o2_data %>% filter(typeset2 == "Surface")
+surface_pH    <- pH_data %>% filter(typeset2 == "Surface")
+subsurface_O2 <- o2_data %>% filter(typeset2 == "Subsurface")
+subsurface_pH <- pH_data %>% filter(typeset2 == "Subsurface")
+
+# Funciones de escalado
+scale_to_range <- function(x, new_min, new_max, old_min = min(x, na.rm=TRUE), old_max = max(x, na.rm=TRUE)) {
+  (x - old_min) / (old_max - old_min) * (new_max - new_min) + new_min
+}
+unscale_from_range <- function(x, original_min, original_max, scaled_min, scaled_max) {
+  (x - scaled_min) / (scaled_max - scaled_min) * (original_max - original_min) + original_min
+}
+
+# --- Función que suaviza mean, mean-sd y mean+sd sobre una grilla fina ---
+smooth_band <- function(data, day_col, mean_col, sd_col, method = "loess", span = 0.4, k = 8) {
+  day_seq <- seq(min(data[[day_col]]), max(data[[day_col]]), length.out = 200)
+  d <- data.frame(Day = data[[day_col]],
+                   lo  = data[[mean_col]] - data[[sd_col]],
+                   mid = data[[mean_col]],
+                   hi  = data[[mean_col]] + data[[sd_col]])
+  fit_one <- function(y) {
+    if (method == "loess") {
+      m <- loess(y ~ Day, data = d, span = span)
+    } else {
+      m <- gam(y ~ s(Day, k = k, bs = "cs"), data = d)
+    }
+    predict(m, newdata = data.frame(Day = day_seq))
+  }
+  data.frame(Day = day_seq,
+             lo  = fit_one(d$lo),
+             mid = fit_one(d$mid),
+             hi  = fit_one(d$hi))
+}
+
+# --- Generar bandas suavizadas ---
+surface_O2_s    <- smooth_band(surface_O2, "Day", "O2_mean", "O2_sd", method = "loess", span = 0.4)
+surface_pH_s    <- smooth_band(surface_pH, "Day", "pH_mean", "pH_sd", method = "loess", span = 0.4)
+subsurface_O2_s <- smooth_band(subsurface_O2, "Day", "O2_mean", "O2_sd", method = "gam", k = 8)
+subsurface_pH_s <- smooth_band(subsurface_pH, "Day", "pH_mean", "pH_sd", method = "gam", k = 8)
+
+# --- Rangos para eje Y (basados en la banda completa, no solo la media) ---
+O2_range_surface <- range(c(surface_O2_s$lo, surface_O2_s$hi), na.rm = TRUE)
+pH_range_surface <- range(c(surface_pH_s$lo, surface_pH_s$hi), na.rm = TRUE)
+
+O2_range_subsurface <- range(c(subsurface_O2_s$lo, subsurface_O2_s$hi), na.rm = TRUE)
+pH_range_subsurface <- range(c(subsurface_pH_s$lo, subsurface_pH_s$hi), na.rm = TRUE)
+
+# --- Escalar pH (banda completa) al rango de O2 ---
+surface_pH_s$mid_s <- scale_to_range(surface_pH_s$mid, O2_range_surface[1], O2_range_surface[2], pH_range_surface[1], pH_range_surface[2])
+surface_pH_s$lo_s  <- scale_to_range(surface_pH_s$lo,  O2_range_surface[1], O2_range_surface[2], pH_range_surface[1], pH_range_surface[2])
+surface_pH_s$hi_s  <- scale_to_range(surface_pH_s$hi,  O2_range_surface[1], O2_range_surface[2], pH_range_surface[1], pH_range_surface[2])
+
+subsurface_pH_s$mid_s <- scale_to_range(subsurface_pH_s$mid, O2_range_subsurface[1], O2_range_subsurface[2], pH_range_subsurface[1], pH_range_subsurface[2])
+subsurface_pH_s$lo_s  <- scale_to_range(subsurface_pH_s$lo,  O2_range_subsurface[1], O2_range_subsurface[2], pH_range_subsurface[1], pH_range_subsurface[2])
+subsurface_pH_s$hi_s  <- scale_to_range(subsurface_pH_s$hi,  O2_range_subsurface[1], O2_range_subsurface[2], pH_range_subsurface[1], pH_range_subsurface[2])
+
+# --- Gráfico Surface ---
+plot_surface <- ggplot() +
+  geom_ribbon(data = surface_O2_s, aes(x = Day, ymin = lo, ymax = hi, fill = "O2"), alpha = 0.25) +
+  geom_ribbon(data = surface_pH_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "pH"), alpha = 0.25) +
+  geom_line(data = surface_O2_s, aes(x = Day, y = mid, color = "O2"), linewidth = 1) +
+  geom_line(data = surface_pH_s, aes(x = Day, y = mid_s, color = "pH"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("Dissolved oxygen (", mu, "mol ", L^-1, ")")),
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., pH_range_surface[1], pH_range_surface[2], O2_range_surface[1], O2_range_surface[2]),
+      name = "pH"
+    )
+  ) +
+  labs(x = "Days", title = "Surface", color = "", fill = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_fill_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface ---
+plot_subsurface <- ggplot() +
+  geom_ribbon(data = subsurface_O2_s, aes(x = Day, ymin = lo, ymax = hi, fill = "O2"), alpha = 0.25) +
+  geom_ribbon(data = subsurface_pH_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "pH"), alpha = 0.25) +
+  geom_line(data = subsurface_O2_s, aes(x = Day, y = mid, color = "O2"), linewidth = 1) +
+  geom_line(data = subsurface_pH_s, aes(x = Day, y = mid_s, color = "pH"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("Dissolved oxygen (", mu, "mol ", L^-1, ")")),
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., pH_range_subsurface[1], pH_range_subsurface[2], O2_range_subsurface[1], O2_range_subsurface[2]),
+      name = "pH"
+    )
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", fill = "") +
+  scale_color_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  scale_fill_manual(values = c("O2" = "red", "pH" = "deepskyblue4")) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+combined_plot <- plot_surface / plot_subsurface
+print(combined_plot)
+```
+
+
+
+# Now plot phosphate and silicate together
+
+```{r}
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$PO4)   # Specify max of first y axis
+max_second <- max(e_data$SiO2) # Specify max of second y axis
+min_first  <- min(e_data$PO4)   # Specify min of first y axis
+min_second <- min(e_data$SiO2) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+#custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+#e_data <- e_data %>%
+#  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+# Luego procedes con tu código de visualización
+nutri_a <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = PO4, color = "PO4")) +
+  geom_point(aes(y = PO4, shape = "PO4", color = "PO4"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(SiO2, scale, shift), color = "SiO2")) +
+  geom_point(aes(y = inv_scale_function(SiO2, scale, shift), shape = "SiO2", color = "SiO2"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 3, 1), labels = seq(0, 3, 1)) +
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "SiO2 (μmol L-1)")) +
+  labs(x = "Days", y = "PO4 (μmol L-1)", color = "", shape = "") +
+  scale_color_manual(values = c("PO4" = "darkblue", "SiO2" = "darkorange1")) +
+  scale_shape_manual(values = c("PO4" = 16, "SiO2" = 17)) +
+  scale_x_continuous(breaks = seq(0, 12, 4), labels = seq(0, 12, 4)) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(nutri_a)
+```
+# new version of this plot
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Funciones de escalado
+scale_function <- function(x, scale, shift) x * scale + shift
+inv_scale_function <- function(x, scale, shift) (x - shift) / scale
+
+# Colores nuevos (sin azul ni naranja)
+nutri_colors <- c("PO4" = "#1B9E77", "SiO2" = "#7570B3")  # teal / púrpura
+nutri_shapes <- c("PO4" = 16, "SiO2" = 17)
+
+# --- Separar por profundidad ---
+surface_data    <- e_data %>% filter(typeset2 == "Surface")
+subsurface_data <- e_data %>% filter(typeset2 == "Subsurface")
+
+# --- Escala/shift para Surface ---
+max_first_surface  <- max(surface_data$PO4, na.rm = TRUE)
+min_first_surface  <- min(surface_data$PO4, na.rm = TRUE)
+max_second_surface <- max(surface_data$SiO2, na.rm = TRUE)
+min_second_surface <- min(surface_data$SiO2, na.rm = TRUE)
+scale_surface <- (max_second_surface - min_second_surface) / (max_first_surface - min_first_surface)
+shift_surface <- min_second_surface - min_first_surface * scale_surface
+
+# --- Escala/shift para Subsurface ---
+max_first_subsurface  <- max(subsurface_data$PO4, na.rm = TRUE)
+min_first_subsurface  <- min(subsurface_data$PO4, na.rm = TRUE)
+max_second_subsurface <- max(subsurface_data$SiO2, na.rm = TRUE)
+min_second_subsurface <- min(subsurface_data$SiO2, na.rm = TRUE)
+scale_subsurface <- (max_second_subsurface - min_second_subsurface) / (max_first_subsurface - min_first_subsurface)
+shift_subsurface <- min_second_subsurface - min_first_subsurface * scale_subsurface
+
+# --- Gráfico Surface (4 mesocosmos) ---
+plot_surface <- ggplot(surface_data, aes(x = Day)) +
+  geom_line(aes(y = PO4, color = "PO4")) +
+  geom_point(aes(y = PO4, shape = "PO4", color = "PO4"), size = 2.5) +
+  geom_line(aes(y = inv_scale_function(SiO2, scale_surface, shift_surface), color = "SiO2")) +
+  geom_point(aes(y = inv_scale_function(SiO2, scale_surface, shift_surface), shape = "SiO2", color = "SiO2"), size = 2.5) +
+  facet_grid(. ~ typeset3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(
+    limits = c(min_first_surface, max_first_surface),
+    name = expression(paste("PO"[4], " (", mu, "mol ", L^-1, ")")),
+    sec.axis = sec_axis(~scale_function(., scale_surface, shift_surface),
+                         name = expression(paste("SiO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Surface", color = "", shape = "") +
+  scale_color_manual(values = nutri_colors) +
+  scale_shape_manual(values = nutri_shapes) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey85", color = "black"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.ticks = element_line(color = "black"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface (4 mesocosmos) ---
+plot_subsurface <- ggplot(subsurface_data, aes(x = Day)) +
+  geom_line(aes(y = PO4, color = "PO4")) +
+  geom_point(aes(y = PO4, shape = "PO4", color = "PO4"), size = 2.5) +
+  geom_line(aes(y = inv_scale_function(SiO2, scale_subsurface, shift_subsurface), color = "SiO2")) +
+  geom_point(aes(y = inv_scale_function(SiO2, scale_subsurface, shift_subsurface), shape = "SiO2", color = "SiO2"), size = 2.5) +
+  facet_grid(. ~ typeset3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(
+    limits = c(min_first_subsurface, max_first_subsurface),
+    name = expression(paste("PO"[4], " (", mu, "mol ", L^-1, ")")),
+    sec.axis = sec_axis(~scale_function(., scale_subsurface, shift_subsurface),
+                         name = expression(paste("SiO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", shape = "") +
+  scale_color_manual(values = nutri_colors) +
+  scale_shape_manual(values = nutri_shapes) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey85", color = "black"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.ticks = element_line(color = "black"),
+    legend.position = "right"
+  )
+
+combined_plot <- plot_surface / plot_subsurface + plot_layout(guides = "collect")
+print(combined_plot)
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# --- Promedio y SD por Day y typeset2 ---
+calc_mean_sd <- function(data, var) {
+  data %>%
+    filter(!is.na(.data[[var]])) %>%
+    group_by(Day, typeset2) %>%
+    summarise(mean = mean(.data[[var]], na.rm = TRUE),
+              sd   = sd(.data[[var]], na.rm = TRUE),
+              .groups = 'drop') %>%
+    mutate(sd = ifelse(is.na(sd), 0, sd))
+}
+
+PO4_data  <- calc_mean_sd(e_data, "PO4")
+SiO2_data <- calc_mean_sd(e_data, "SiO2")
+
+surface_PO4     <- PO4_data  %>% filter(typeset2 == "Surface")
+surface_SiO2    <- SiO2_data %>% filter(typeset2 == "Surface")
+subsurface_PO4  <- PO4_data  %>% filter(typeset2 == "Subsurface")
+subsurface_SiO2 <- SiO2_data %>% filter(typeset2 == "Subsurface")
+
+# --- Función de suavizado ---
+smooth_band <- function(data, method = "loess", span = 0.4, k = 8, day_range = NULL) {
+  if (is.null(day_range)) day_range <- range(data$Day)
+  day_seq <- seq(day_range[1], day_range[2], length.out = 200)
+  d <- data.frame(Day = data$Day, lo = data$mean - data$sd, mid = data$mean, hi = data$mean + data$sd)
+  fit_one <- function(y) {
+    if (method == "loess") {
+      m <- loess(y ~ Day, data = d, span = span, control = loess.control(surface = "direct"))
+    } else {
+      m <- gam(y ~ s(Day, k = k, bs = "tp"), data = d, method = "REML", select = FALSE)
+    }
+    predict(m, newdata = data.frame(Day = day_seq))
+  }
+  data.frame(Day = day_seq, lo = fit_one(d$lo), mid = fit_one(d$mid), hi = fit_one(d$hi))
+}
+
+# --- Generar bandas suavizadas ---
+surface_PO4_s     <- smooth_band(surface_PO4, method = "loess", span = 0.4)
+surface_SiO2_s    <- smooth_band(surface_SiO2, method = "loess", span = 0.4)
+subsurface_PO4_s  <- smooth_band(subsurface_PO4, method = "loess", span = 0.4)   # cambiado a loess
+subsurface_SiO2_s <- smooth_band(subsurface_SiO2, method = "loess", span = 0.4)  # cambiado a loess
+
+# --- Rango del eje primario (PO4) con padding ---
+pad_range <- function(range_vec, pct = 0.02) {
+  span <- diff(range_vec)
+  c(range_vec[1] - span * pct, range_vec[2] + span * pct)
+}
+
+prim_range_surface    <- pad_range(range(c(surface_PO4_s$lo, surface_PO4_s$hi), na.rm = TRUE))
+prim_range_subsurface <- pad_range(range(c(subsurface_PO4_s$lo, subsurface_PO4_s$hi), na.rm = TRUE))
+
+# --- Rango de SiO2 y escala/shift (calculados DESPUÉS del padding) ---
+SiO2_range_surface    <- range(c(surface_SiO2_s$lo, surface_SiO2_s$hi), na.rm = TRUE)
+SiO2_range_subsurface <- range(c(subsurface_SiO2_s$lo, subsurface_SiO2_s$hi), na.rm = TRUE)
+
+get_scale_shift <- function(target_range, source_range) {
+  scale <- (target_range[2] - target_range[1]) / (source_range[2] - source_range[1])
+  shift <- target_range[1] - source_range[1] * scale
+  list(scale = scale, shift = shift)
+}
+ss_surface    <- get_scale_shift(prim_range_surface, SiO2_range_surface)
+ss_subsurface <- get_scale_shift(prim_range_subsurface, SiO2_range_subsurface)
+
+scale_fwd <- function(x, scale, shift) x * scale + shift
+scale_inv <- function(x, scale, shift) (x - shift) / scale
+
+# --- Aplicar transformación a las bandas de SiO2 ---
+surface_SiO2_s <- surface_SiO2_s %>%
+  mutate(lo_s = scale_fwd(lo, ss_surface$scale, ss_surface$shift),
+         mid_s = scale_fwd(mid, ss_surface$scale, ss_surface$shift),
+         hi_s = scale_fwd(hi, ss_surface$scale, ss_surface$shift))
+
+subsurface_SiO2_s <- subsurface_SiO2_s %>%
+  mutate(lo_s = scale_fwd(lo, ss_subsurface$scale, ss_subsurface$shift),
+         mid_s = scale_fwd(mid, ss_subsurface$scale, ss_subsurface$shift),
+         hi_s = scale_fwd(hi, ss_subsurface$scale, ss_subsurface$shift))
+
+# --- Colores ---
+nutri_colors <- c("PO4" = "#1B9E77", "SiO2" = "#7570B3")
+
+# --- Gráfico Surface (promedio ± SD) ---
+plot_surface_avg <- ggplot() +
+  geom_ribbon(data = surface_PO4_s, aes(x = Day, ymin = lo, ymax = hi, fill = "PO4"), alpha = 0.25) +
+  geom_ribbon(data = surface_SiO2_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "SiO2"), alpha = 0.25) +
+  geom_line(data = surface_PO4_s, aes(x = Day, y = mid, color = "PO4"), linewidth = 1) +
+  geom_line(data = surface_SiO2_s, aes(x = Day, y = mid_s, color = "SiO2"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("PO"[4], " (", mu, "mol ", L^-1, ")")),
+    limits = prim_range_surface,
+    sec.axis = sec_axis(~scale_inv(., ss_surface$scale, ss_surface$shift),
+                         name = expression(paste("SiO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Surface", color = "", fill = "") +
+  scale_color_manual(values = nutri_colors) +
+  scale_fill_manual(values = nutri_colors) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"), axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface (promedio ± SD) ---
+plot_subsurface_avg <- ggplot() +
+  geom_ribbon(data = subsurface_PO4_s, aes(x = Day, ymin = lo, ymax = hi, fill = "PO4"), alpha = 0.25) +
+  geom_ribbon(data = subsurface_SiO2_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "SiO2"), alpha = 0.25) +
+  geom_line(data = subsurface_PO4_s, aes(x = Day, y = mid, color = "PO4"), linewidth = 1) +
+  geom_line(data = subsurface_SiO2_s, aes(x = Day, y = mid_s, color = "SiO2"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("PO"[4], " (", mu, "mol ", L^-1, ")")),
+    limits = prim_range_subsurface,
+    sec.axis = sec_axis(~scale_inv(., ss_subsurface$scale, ss_subsurface$shift),
+                         name = expression(paste("SiO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", fill = "") +
+  scale_color_manual(values = nutri_colors) +
+  scale_fill_manual(values = nutri_colors) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"), axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Combinar ---
+combined_plot_avg <- plot_surface_avg / plot_subsurface_avg + plot_layout(guides = "collect")
+print(combined_plot_avg)
+```
+
+
+
+# nitrate and nitrite
+
+```{r}
+e_data <- na.omit(e_data)
+
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$NO3)   # Specify max of first y axis
+max_second <- max(e_data$NO2) # Specify max of second y axis
+min_first  <- min(e_data$NO3-0.07)   # Specify min of first y axis
+min_second <- min(e_data$NO2) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+#custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+#e_data <- e_data %>%
+#  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+
+# Luego procedes con tu código de visualización
+nutri_b <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = NO3, color = "NO3")) +
+  geom_point(aes(y = NO3, shape = "NO3", color = "NO3"), size = 3) +
+  geom_line(aes(y = NH4, color = "NH4")) +
+  geom_point(aes(y = NH4, shape = "NH4", color = "NH4"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(NO2, scale, shift), color = "NO2")) +
+  geom_point(aes(y = inv_scale_function(NO2, scale, shift), shape = "NO2", color = "NO2"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +  # Establece los límites del eje x
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "NO2 (μmol/L)")) +
+  labs(x = "Days", y = "NO3 (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("NO3" = "lightblue4", "NO2" = "lightsalmon", "NH4" = "red4")) +
+  scale_shape_manual(values = c("NO3" = 16, "NO2" = 17, "NH4" = 18)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(nutri_b)
+```
+# Modify the nutrient plots following Julio's suggestion (i.e., independent scales to better highlight trends)
+
+```{r}
+# Reordenar niveles de typeset2
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Filtrar los datos para Surface y Subsurface
+surface_data <- e_data %>% filter(typeset2 == "Surface")
+subsurface_data <- e_data %>% filter(typeset2 == "Subsurface")
+
+# Calcular escala y desplazamiento para Surface
+max_first_surface <- max(surface_data$NO3)
+min_first_surface <- min(surface_data$NO3 - 0.07)
+max_second_surface <- max(surface_data$NO2)
+min_second_surface <- min(surface_data$NO2)
+
+scale_surface <- (max_second_surface - min_second_surface) / (max_first_surface - min_first_surface)
+shift_surface <- min_second_surface - min_first_surface * scale_surface
+
+# Calcular escala y desplazamiento para Subsurface
+max_first_subsurface <- max(subsurface_data$NO3)
+min_first_subsurface <- min(subsurface_data$NO3 - 0.07)
+max_second_subsurface <- max(subsurface_data$NO2)
+min_second_subsurface <- min(subsurface_data$NO2)
+
+scale_subsurface <- (max_second_subsurface - min_second_subsurface) / (max_first_subsurface - min_first_subsurface)
+shift_subsurface <- min_second_subsurface - min_first_subsurface * scale_subsurface
+
+# Funciones de escalado
+scale_function <- function(x, scale, shift) x * scale + shift
+inv_scale_function <- function(x, scale, shift) (x - shift) / scale
+
+# Gráfico para Surface
+plot_surface <- ggplot(surface_data, aes(x = Day)) +
+  geom_line(aes(y = NO3, color = "NO3")) +
+  geom_point(aes(y = NO3, shape = "NO3", color = "NO3"), size = 3) +
+  geom_line(aes(y = NH4, color = "NH4")) +
+  geom_point(aes(y = NH4, shape = "NH4", color = "NH4"), size = 3) +
+  geom_line(aes(y = inv_scale_function(NO2, scale_surface, shift_surface), color = "NO2")) +
+  geom_point(aes(y = inv_scale_function(NO2, scale_surface, shift_surface), shape = "NO2", color = "NO2"), size = 3) +
+  facet_grid(. ~ typeset3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_surface, max_first_surface), sec.axis = sec_axis(~scale_function(., scale_surface, shift_surface), name = "NO2 (μmol/L)")) +
+  labs(x = "Days", y = "NO3 (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("NO3" = "lightblue4", "NO2" = "lightsalmon", "NH4" = "red4")) +
+  scale_shape_manual(values = c("NO3" = 16, "NO2" = 17, "NH4" = 18)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Gráfico para Subsurface
+plot_subsurface <- ggplot(subsurface_data, aes(x = Day)) +
+  geom_line(aes(y = NO3, color = "NO3")) +
+  geom_point(aes(y = NO3, shape = "NO3", color = "NO3"), size = 3) +
+  geom_line(aes(y = NH4, color = "NH4")) +
+  geom_point(aes(y = NH4, shape = "NH4", color = "NH4"), size = 3) +
+  geom_line(aes(y = inv_scale_function(NO2, scale_subsurface, shift_subsurface), color = "NO2")) +
+  geom_point(aes(y = inv_scale_function(NO2, scale_subsurface, shift_subsurface), shape = "NO2", color = "NO2"), size = 3) +
+  facet_grid(. ~ typeset3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_subsurface, max_first_subsurface), sec.axis = sec_axis(~scale_function(., scale_subsurface, shift_subsurface), name = "NO2 (μmol/L)")) +
+  labs(x = "Days", y = "NO3 (μmol/L)", color = "", shape = "") +
+  scale_color_manual(values = c("NO3" = "lightblue4", "NO2" = "lightsalmon", "NH4" = "red4")) +
+  scale_shape_manual(values = c("NO3" = 16, "NO2" = 17, "NH4" = 18)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Combinar gráficos
+combined_plot <- plot_surface / plot_subsurface + plot_layout(guides = "collect")
+print(combined_plot)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+
+# Reordenar niveles de typeset2
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# --- Promedio y SD por Day y typeset2 (cada variable filtrada por separado) ---
+calc_mean_sd <- function(data, var) {
+  data %>%
+    filter(!is.na(.data[[var]])) %>%
+    group_by(Day, typeset2) %>%
+    summarise(mean = mean(.data[[var]], na.rm = TRUE),
+              sd   = sd(.data[[var]], na.rm = TRUE),
+              .groups = 'drop') %>%
+    mutate(sd = ifelse(is.na(sd), 0, sd))
+}
+
+NO3_data <- calc_mean_sd(e_data, "NO3")
+NH4_data <- calc_mean_sd(e_data, "NH4")
+NO2_data <- calc_mean_sd(e_data, "NO2")
+
+# Separar por profundidad
+surface_NO3 <- NO3_data %>% filter(typeset2 == "Surface")
+surface_NH4 <- NH4_data %>% filter(typeset2 == "Surface")
+surface_NO2 <- NO2_data %>% filter(typeset2 == "Surface")
+
+subsurface_NO3 <- NO3_data %>% filter(typeset2 == "Subsurface")
+subsurface_NH4 <- NH4_data %>% filter(typeset2 == "Subsurface")
+subsurface_NO2 <- NO2_data %>% filter(typeset2 == "Subsurface")
+
+# --- Función que suaviza mean, mean-sd, mean+sd sobre grilla fina ---
+smooth_band <- function(data, method = "loess", span = 0.4, k = 8, day_range = NULL) {
+  if (is.null(day_range)) day_range <- range(data$Day)
+  day_seq <- seq(day_range[1], day_range[2], length.out = 200)
+  d <- data.frame(Day = data$Day, lo = data$mean - data$sd, mid = data$mean, hi = data$mean + data$sd)
+  fit_one <- function(y) {
+    if (method == "loess") {
+      m <- loess(y ~ Day, data = d, span = span, control = loess.control(surface = "direct"))
+    } else {
+      m <- gam(y ~ s(Day, k = k, bs = "cs"), data = d)
+    }
+    predict(m, newdata = data.frame(Day = day_seq))
+  }
+  data.frame(Day = day_seq, lo = fit_one(d$lo), mid = fit_one(d$mid), hi = fit_one(d$hi))
+}
+
+# --- Generar bandas suavizadas ---
+# Surface: loess para NO3/NH4, gam para NO2 (más estable con su patrón irregular)
+surface_NO3_s <- smooth_band(surface_NO3, method = "loess", span = 0.4)
+surface_NH4_s <- smooth_band(surface_NH4, method = "loess", span = 0.4)
+surface_NO2_s <- smooth_band(surface_NO2, method = "gam", k = 8)
+
+# Subsurface: gam para las tres (igual que en O2/pH)
+subsurface_NO3_s <- smooth_band(subsurface_NO3, method = "gam", k = 8)
+subsurface_NH4_s <- smooth_band(subsurface_NH4, method = "gam", k = 8)
+subsurface_NO2_s <- smooth_band(subsurface_NO2, method = "gam", k = 8)
+
+# --- 1. Rango del eje primario (banda completa de NO3 y NH4) ---
+prim_range_surface    <- range(c(surface_NO3_s$lo, surface_NO3_s$hi,
+                                  surface_NH4_s$lo, surface_NH4_s$hi), na.rm = TRUE)
+prim_range_subsurface <- range(c(subsurface_NO3_s$lo, subsurface_NO3_s$hi,
+                                  subsurface_NH4_s$lo, subsurface_NH4_s$hi), na.rm = TRUE)
+
+# --- 2. Padding para evitar cortes por redondeo en los bordes ---
+pad_range <- function(range_vec, pct = 0.02) {
+  span <- diff(range_vec)
+  c(range_vec[1] - span * pct, range_vec[2] + span * pct)
+}
+prim_range_surface    <- pad_range(prim_range_surface)
+prim_range_subsurface <- pad_range(prim_range_subsurface)
+
+# --- 3. Rango de NO2 y cálculo de escala/shift usando el rango YA expandido ---
+NO2_range_surface    <- range(c(surface_NO2_s$lo, surface_NO2_s$hi), na.rm = TRUE)
+NO2_range_subsurface <- range(c(subsurface_NO2_s$lo, subsurface_NO2_s$hi), na.rm = TRUE)
+
+get_scale_shift <- function(target_range, source_range) {
+  scale <- (target_range[2] - target_range[1]) / (source_range[2] - source_range[1])
+  shift <- target_range[1] - source_range[1] * scale
+  list(scale = scale, shift = shift)
+}
+
+ss_surface    <- get_scale_shift(prim_range_surface, NO2_range_surface)
+ss_subsurface <- get_scale_shift(prim_range_subsurface, NO2_range_subsurface)
+
+scale_fwd <- function(x, scale, shift) x * scale + shift        # NO2 real -> escala primaria
+scale_inv <- function(x, scale, shift) (x - shift) / scale      # escala primaria -> NO2 real
+
+# --- 4. Aplicar transformación a las bandas de NO2 ---
+surface_NO2_s <- surface_NO2_s %>%
+  mutate(lo_s = scale_fwd(lo, ss_surface$scale, ss_surface$shift),
+         mid_s = scale_fwd(mid, ss_surface$scale, ss_surface$shift),
+         hi_s = scale_fwd(hi, ss_surface$scale, ss_surface$shift))
+
+subsurface_NO2_s <- subsurface_NO2_s %>%
+  mutate(lo_s = scale_fwd(lo, ss_subsurface$scale, ss_subsurface$shift),
+         mid_s = scale_fwd(mid, ss_subsurface$scale, ss_subsurface$shift),
+         hi_s = scale_fwd(hi, ss_subsurface$scale, ss_subsurface$shift))
+
+# --- Colores consistentes ---
+nutrient_colors <- c("NO3" = "lightblue4", "NO2" = "lightsalmon", "NH4" = "red4")
+
+# --- Gráfico Surface ---
+plot_surface <- ggplot() +
+  geom_ribbon(data = surface_NO3_s, aes(x = Day, ymin = lo, ymax = hi, fill = "NO3"), alpha = 0.25) +
+  geom_ribbon(data = surface_NH4_s, aes(x = Day, ymin = lo, ymax = hi, fill = "NH4"), alpha = 0.25) +
+  geom_ribbon(data = surface_NO2_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "NO2"), alpha = 0.25) +
+  geom_line(data = surface_NO3_s, aes(x = Day, y = mid, color = "NO3"), linewidth = 1) +
+  geom_line(data = surface_NH4_s, aes(x = Day, y = mid, color = "NH4"), linewidth = 1) +
+  geom_line(data = surface_NO2_s, aes(x = Day, y = mid_s, color = "NO2"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("NO"[3], " (", mu, "mol ", L^-1, ")")),
+    limits = prim_range_surface,
+    sec.axis = sec_axis(~scale_inv(., ss_surface$scale, ss_surface$shift),
+                         name = expression(paste("NO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Surface", color = "", fill = "") +
+  scale_color_manual(values = nutrient_colors) +
+  scale_fill_manual(values = nutrient_colors) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface ---
+plot_subsurface <- ggplot() +
+  geom_ribbon(data = subsurface_NO3_s, aes(x = Day, ymin = lo, ymax = hi, fill = "NO3"), alpha = 0.25) +
+  geom_ribbon(data = subsurface_NH4_s, aes(x = Day, ymin = lo, ymax = hi, fill = "NH4"), alpha = 0.25) +
+  geom_ribbon(data = subsurface_NO2_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "NO2"), alpha = 0.25) +
+  geom_line(data = subsurface_NO3_s, aes(x = Day, y = mid, color = "NO3"), linewidth = 1) +
+  geom_line(data = subsurface_NH4_s, aes(x = Day, y = mid, color = "NH4"), linewidth = 1) +
+  geom_line(data = subsurface_NO2_s, aes(x = Day, y = mid_s, color = "NO2"), linewidth = 1) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("NO"[3], " (", mu, "mol ", L^-1, ")")),
+    limits = prim_range_subsurface,
+    sec.axis = sec_axis(~scale_inv(., ss_subsurface$scale, ss_subsurface$shift),
+                         name = expression(paste("NO"[2], " (", mu, "mol ", L^-1, ")")))
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", fill = "") +
+  scale_color_manual(values = nutrient_colors) +
+  scale_fill_manual(values = nutrient_colors) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# Combinar
+combined_plot <- plot_surface / plot_subsurface + plot_layout(guides = "collect")
+print(combined_plot)
+```
+
+
+
+
+# Chlorophyll + N:P + lIGHT
+
+```{r}
+e_data <- na.omit(e_data)
+
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$Chla)   # Specify max of first y axis
+max_second <- max(e_data$Light) # Specify max of second y axis
+min_first  <- min(e_data$Chla)   # Specify min of first y axis
+min_second <- min(e_data$Light) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+#custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+#e_data <- e_data %>%
+#  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+
+# Luego procedes con tu código de visualización
+nutri_b <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = Chla, color = "Chla")) +
+  geom_point(aes(y = Chla, shape = "Chla", color = "Chla"), size = 3) +
+  geom_line(aes(y = Light, color = "NP")) +
+  geom_point(aes(y = NP, shape = "NP", color = "NP"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(Light, scale, shift), color = "Light")) +
+  geom_point(aes(y = inv_scale_function(Light, scale, shift), shape = "Light", color = "Light"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +  # Establece los límites del eje x
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "Light (%)")) +
+  labs(x = "Days", y = "Chla (μg/L)", color = "", shape = "") +
+  scale_color_manual(values = c("Chla" = "darkgreen", "Light" = "blue")) +
+  scale_shape_manual(values = c("Chla" = 16, "Light" = 17, "NP" = 18)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(nutri_b)
+```
+
+
+# removemos C:N
+# Chlorophyll + lIGHT
+
+```{r}
+e_data <- na.omit(e_data)
+
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$Chla)   # Specify max of first y axis
+max_second <- max(e_data$Light) # Specify max of second y axis
+min_first  <- min(e_data$Chla)   # Specify min of first y axis
+min_second <- min(e_data$Light) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+#custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+#e_data <- e_data %>%
+#  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+
+# Luego procedes con tu código de visualización
+nutri_b <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = Chla, color = "Chla")) +
+  geom_point(aes(y = Chla, shape = "Chla", color = "Chla"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(Light, scale, shift), color = "Light")) +
+  geom_point(aes(y = inv_scale_function(Light, scale, shift), shape = "Light", color = "Light"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +  # Establece los límites del eje x
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "Light intensity (%)")) +
+  labs(x = "Days", y = "Chla (μg L^-1)", color = "", shape = "") +
+  scale_color_manual(values = c("Chla" = "darkseagreen", "Light" = "steelblue")) +
+  scale_shape_manual(values = c("Chla" = 16, "Light" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+print(nutri_b)
+```
+#eje independiente
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# --- Paleta actualizada ---
+col_chla  <- "palegreen4"  # verde
+col_light <- "darkgoldenrod1"  # salmón claro (RdBu)
+
+# --- Función auxiliar: calcula scale/shift para usar con inv_scale_function ---
+get_scale_shift <- function(chla_vals, light_vals) {
+  min_c <- min(chla_vals, na.rm = TRUE)
+  max_c <- max(chla_vals, na.rm = TRUE)
+  min_l <- min(light_vals, na.rm = TRUE)
+  max_l <- max(light_vals, na.rm = TRUE)
+  scale <- (max_l - min_l) / (max_c - min_c)
+  shift <- min_l - min_c * scale
+  list(scale = scale, shift = shift, min_c = min_c, max_c = max_c)
+}
+
+scale_function     <- function(x, scale, shift) x * scale + shift
+inv_scale_function  <- function(x, scale, shift) (x - shift) / scale
+
+# --- Subsets ---
+surface_data    <- e_data %>% filter(typeset2 == "Surface")
+subsurface_data <- e_data %>% filter(typeset2 == "Subsurface")
+
+ss_surf <- get_scale_shift(surface_data$Chla, surface_data$Light)
+ss_sub  <- get_scale_shift(subsurface_data$Chla, subsurface_data$Light)
+
+# --- Función para construir cada panel ---
+build_panel <- function(data, ss, xlab = NULL, show_x_labels = TRUE) {
+  ggplot(data, aes(x = Day)) +
+    geom_line(aes(y = Chla, color = "Chla")) +
+    geom_point(aes(y = Chla, shape = "Chla", color = "Chla"), size = 3) +
+    geom_line(aes(y = inv_scale_function(Light, ss$scale, ss$shift), color = "Light")) +
+    geom_point(aes(y = inv_scale_function(Light, ss$scale, ss$shift), shape = "Light", color = "Light"), size = 3) +
+    facet_grid(typeset2 ~ typeset3, switch = "y") +
+    scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+    scale_y_continuous(
+      limits = c(ss$min_c, ss$max_c),
+      sec.axis = sec_axis(~ scale_function(., ss$scale, ss$shift), name = "Light intensity (%)")
+    ) +
+    labs(x = xlab, y = expression(paste("Chla (", mu, "g L"^-1, ")")), color = "", shape = "") +
+    scale_color_manual(values = c("Chla" = col_chla, "Light" = col_light)) +
+    scale_shape_manual(values = c("Chla" = 16, "Light" = 17)) +
+    theme(
+      panel.background = element_rect(fill = "white", color = "black"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text.x = if (show_x_labels) element_text() else element_blank(),
+      axis.ticks.x = if (show_x_labels) element_line() else element_blank()
+    )
+}
+
+p_surf <- build_panel(surface_data, ss_surf, xlab = NULL, show_x_labels = FALSE)
+p_sub  <- build_panel(subsurface_data, ss_sub, xlab = "Days", show_x_labels = TRUE)
+
+nutri_b <- p_surf / p_sub +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+
+print(nutri_b)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# --- Colores ---
+col_chla  <- "palegreen4"
+col_light <- "darkgoldenrod1"
+
+# --- Rango REAL de los datos crudos (para anclar el eje y recortar el suavizado) ---
+raw_Light_range_surface    <- range(e_data$Light[e_data$typeset2 == "Surface"],    na.rm = TRUE)
+raw_Light_range_subsurface <- range(e_data$Light[e_data$typeset2 == "Subsurface"], na.rm = TRUE)
+
+# --- Calcular promedio y SE por Day y typeset2 (los 4 mesocosms juntos) ---
+chla_data <- e_data %>%
+  filter(!is.na(Chla)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(Chla_mean = mean(Chla, na.rm = TRUE),
+            Chla_sd   = sd(Chla, na.rm = TRUE) / sqrt(n()),
+            .groups = 'drop') %>%
+  mutate(Chla_sd = ifelse(is.na(Chla_sd), 0, Chla_sd))
+
+light_data <- e_data %>%
+  filter(!is.na(Light)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(Light_mean = mean(Light, na.rm = TRUE),
+            Light_sd   = sd(Light, na.rm = TRUE) / sqrt(n()),
+            .groups = 'drop') %>%
+  mutate(Light_sd = ifelse(is.na(Light_sd), 0, Light_sd))
+
+# --- Separar por profundidad ---
+surface_Chla    <- chla_data  %>% filter(typeset2 == "Surface")
+surface_Light   <- light_data %>% filter(typeset2 == "Surface")
+subsurface_Chla  <- chla_data  %>% filter(typeset2 == "Subsurface")
+subsurface_Light <- light_data %>% filter(typeset2 == "Subsurface")
+
+# --- Funciones de escalado ---
+scale_to_range <- function(x, new_min, new_max, old_min, old_max) {
+  (x - old_min) / (old_max - old_min) * (new_max - new_min) + new_min
+}
+unscale_from_range <- function(x, original_min, original_max, scaled_min, scaled_max) {
+  (x - scaled_min) / (scaled_max - scaled_min) * (original_max - original_min) + original_min
+}
+
+# --- Función que suaviza mean, mean-sd y mean+sd, y recorta al rango real de los datos crudos ---
+smooth_band <- function(data, day_col, mean_col, sd_col, method = "loess", span = 0.4, k = 8,
+                         clip_zero = FALSE, raw_range = NULL) {
+  day_seq <- seq(min(data[[day_col]]), max(data[[day_col]]), length.out = 200)
+  lo_raw <- data[[mean_col]] - data[[sd_col]]
+  if (clip_zero) lo_raw <- pmax(lo_raw, 0)
+  d <- data.frame(Day = data[[day_col]],
+                   lo  = lo_raw,
+                   mid = data[[mean_col]],
+                   hi  = data[[mean_col]] + data[[sd_col]])
+  fit_one <- function(y) {
+    if (method == "loess") {
+      m <- loess(y ~ Day, data = d, span = span)
+    } else {
+      m <- gam(y ~ s(Day, k = k, bs = "cs"), data = d)
+    }
+    predict(m, newdata = data.frame(Day = day_seq))
+  }
+  out <- data.frame(Day = day_seq,
+                     lo  = fit_one(d$lo),
+                     mid = fit_one(d$mid),
+                     hi  = fit_one(d$hi))
+  if (!is.null(raw_range)) {
+    out$lo  <- pmin(pmax(out$lo,  raw_range[1]), raw_range[2])
+    out$mid <- pmin(pmax(out$mid, raw_range[1]), raw_range[2])
+    out$hi  <- pmin(pmax(out$hi,  raw_range[1]), raw_range[2])
+  }
+  out
+}
+
+# --- Generar bandas suavizadas ---
+surface_Chla_s     <- smooth_band(surface_Chla,     "Day", "Chla_mean",  "Chla_sd",  method = "loess", span = 0.4)
+surface_Light_s    <- smooth_band(surface_Light,    "Day", "Light_mean", "Light_sd", method = "loess", span = 0.4,
+                                   clip_zero = TRUE, raw_range = raw_Light_range_surface)
+subsurface_Chla_s  <- smooth_band(subsurface_Chla,  "Day", "Chla_mean",  "Chla_sd",  method = "gam", k = 8)
+subsurface_Light_s <- smooth_band(subsurface_Light, "Day", "Light_mean", "Light_sd", method = "loess", span = 0.35,
+                                   clip_zero = TRUE, raw_range = raw_Light_range_subsurface)
+
+# --- Rangos para eje Y de Chla (basados en la banda completa) ---
+Chla_range_surface    <- range(c(surface_Chla_s$lo, surface_Chla_s$hi), na.rm = TRUE)
+Chla_range_subsurface <- range(c(subsurface_Chla_s$lo, subsurface_Chla_s$hi), na.rm = TRUE)
+
+# --- Escalar Light usando el rango REAL de los datos crudos ---
+surface_Light_s$mid_s <- scale_to_range(surface_Light_s$mid, Chla_range_surface[1], Chla_range_surface[2], raw_Light_range_surface[1], raw_Light_range_surface[2])
+surface_Light_s$lo_s  <- scale_to_range(surface_Light_s$lo,  Chla_range_surface[1], Chla_range_surface[2], raw_Light_range_surface[1], raw_Light_range_surface[2])
+surface_Light_s$hi_s  <- scale_to_range(surface_Light_s$hi,  Chla_range_surface[1], Chla_range_surface[2], raw_Light_range_surface[1], raw_Light_range_surface[2])
+
+subsurface_Light_s$mid_s <- scale_to_range(subsurface_Light_s$mid, Chla_range_subsurface[1], Chla_range_subsurface[2], raw_Light_range_subsurface[1], raw_Light_range_subsurface[2])
+subsurface_Light_s$lo_s  <- scale_to_range(subsurface_Light_s$lo,  Chla_range_subsurface[1], Chla_range_subsurface[2], raw_Light_range_subsurface[1], raw_Light_range_subsurface[2])
+subsurface_Light_s$hi_s  <- scale_to_range(subsurface_Light_s$hi,  Chla_range_subsurface[1], Chla_range_subsurface[2], raw_Light_range_subsurface[1], raw_Light_range_subsurface[2])
+
+# --- Gráfico Surface ---
+plot_surface <- ggplot() +
+  geom_ribbon(data = surface_Chla_s,  aes(x = Day, ymin = lo,   ymax = hi,   fill  = "Chla"), alpha = 0.25) +
+  geom_ribbon(data = surface_Light_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill  = "Light"), alpha = 0.25) +
+  geom_line(data = surface_Chla_s,  aes(x = Day, y = mid,   color = "Chla"),  linewidth = 1) +
+  geom_line(data = surface_Light_s, aes(x = Day, y = mid_s, color = "Light"), linewidth = 1) +
+  coord_cartesian(ylim = Chla_range_surface) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("Chla (", mu, "g L"^-1, ")")),
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., raw_Light_range_surface[1], raw_Light_range_surface[2], Chla_range_surface[1], Chla_range_surface[2]),
+      name = "Light intensity (%)"
+    )
+  ) +
+  labs(x = "Days", title = "Surface", color = "", fill = "") +
+  scale_color_manual(values = c("Chla" = col_chla, "Light" = col_light)) +
+  scale_fill_manual(values = c("Chla" = col_chla, "Light" = col_light)) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface ---
+plot_subsurface <- ggplot() +
+  geom_ribbon(data = subsurface_Chla_s,  aes(x = Day, ymin = lo,   ymax = hi,   fill  = "Chla"), alpha = 0.25) +
+  geom_ribbon(data = subsurface_Light_s, aes(x = Day, ymin = lo_s, ymax = hi_s, fill  = "Light"), alpha = 0.25) +
+  geom_line(data = subsurface_Chla_s,  aes(x = Day, y = mid,   color = "Chla"),  linewidth = 1) +
+  geom_line(data = subsurface_Light_s, aes(x = Day, y = mid_s, color = "Light"), linewidth = 1) +
+  coord_cartesian(ylim = Chla_range_subsurface) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = expression(paste("Chla (", mu, "g L"^-1, ")")),
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., raw_Light_range_subsurface[1], raw_Light_range_subsurface[2], Chla_range_subsurface[1], Chla_range_subsurface[2]),
+      name = "Light intensity (%)"
+    )
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", fill = "") +
+  scale_color_manual(values = c("Chla" = col_chla, "Light" = col_light)) +
+  scale_fill_manual(values = c("Chla" = col_chla, "Light" = col_light)) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+combined_plot <- plot_surface / plot_subsurface
+print(combined_plot)
+```
+
+
+
+#Finalmente Temperatura y salinidad
+
+```{r}
+e_data <- na.omit(e_data)
+
+library(ggplot2)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+max_first  <- max(e_data$Salinity)   # Specify max of first y axis
+max_second <- max(e_data$Temp) # Specify max of second y axis
+min_first  <- min(e_data$Salinity)   # Specify min of first y axis
+min_second <- min(e_data$Temp) # Specify min of second y axis
+
+# scale and shift variables calculated based on desired mins and maxes
+scale <- (max_second - min_second) / (max_first - min_first)
+shift <- min_second - min_first * scale
+
+# Function to scale secondary axis
+scale_function <- function(x, scale, shift) {
+  return (x * scale + shift)
+}
+
+# Function to scale secondary variable values
+inv_scale_function <- function(x, scale, shift) {
+  return ((x - shift) / scale)
+}
+```
+
+```{r}
+library(dplyr)
+
+# Define el orden personalizado
+custom_order <- c("Mesocosm 5", "Mesocosm 8", "Mesocosm 6", "Mesocosm 7")
+
+# Reordena los niveles en typeset3
+e_data <- e_data %>%
+  mutate(typeset3 = factor(typeset3, levels = custom_order))
+
+# Luego procedes con tu código de visualización
+pkpd <- ggplot(e_data, aes(x = Day)) +
+  geom_line(aes(y = Salinity, color = "Salinity")) +
+  geom_point(aes(y = Salinity, shape = "Salinity", color = "Salinity"), size = 3) +
+  facet_grid(typeset2 ~ typeset3, scales = "free", switch = "y") +
+  geom_line(aes(y = inv_scale_function(Temp, scale, shift), color = "Temp")) +
+  geom_point(aes(y = inv_scale_function(Temp, scale, shift), shape = "Temp", color = "Temp"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +  # Establece los límites del eje x
+  scale_y_continuous(limits = c(min_first, max_first), sec.axis = sec_axis(~scale_function(., scale, shift), name = "Temperature (oC)")) +
+  labs(x = "Days", y = "Salinity", color = "", shape = "") +
+  scale_color_manual(values = c("Salinity" = "lightskyblue4", "Temp" = "lightsalmon")) +
+  scale_shape_manual(values = c("Salinity" = 16, "Temp" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) #+
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje x
+
+print(pkpd)
+```
+# modificacion de este codigo para que aparezca los tick en el eje X de "Surface"
+
+```{r}
+# Cargar las librerías necesarias
+library(ggplot2)
+library(dplyr)
+
+# Asegurarse de que los niveles de "typeset2" estén en el orden correcto
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# Definir límites específicos para cada capa
+max_first_surface  <- max(e_data$Salinity[e_data$typeset2 == "Surface"])
+min_first_surface  <- min(e_data$Salinity[e_data$typeset2 == "Surface"])
+max_second_surface <- max(e_data$Temp[e_data$typeset2 == "Surface"])
+min_second_surface <- min(e_data$Temp[e_data$typeset2 == "Surface"])
+
+max_first_subsurface  <- max(e_data$Salinity[e_data$typeset2 == "Subsurface"])
+min_first_subsurface  <- min(e_data$Salinity[e_data$typeset2 == "Subsurface"])
+max_second_subsurface <- max(e_data$Temp[e_data$typeset2 == "Subsurface"])
+min_second_subsurface <- min(e_data$Temp[e_data$typeset2 == "Subsurface"])
+
+# Calcular escala y desplazamiento para cada capa
+scale_surface <- (max_second_surface - min_second_surface) / (max_first_surface - min_first_surface)
+shift_surface <- min_second_surface - min_first_surface * scale_surface
+
+scale_subsurface <- (max_second_subsurface - min_second_subsurface) / (max_first_subsurface - min_first_subsurface)
+shift_subsurface <- min_second_subsurface - min_first_subsurface * scale_subsurface
+
+# Crear gráfico para Surface
+plot_surface <- ggplot(e_data %>% filter(typeset2 == "Surface"), aes(x = Day)) +
+  geom_line(aes(y = Salinity, color = "Salinity")) +
+  geom_point(aes(y = Salinity, shape = "Salinity", color = "Salinity"), size = 3) +
+  facet_wrap(~typeset3, ncol = 4) +
+  geom_line(aes(y = inv_scale_function(Temp, scale_surface, shift_surface), color = "Temp")) +
+  geom_point(aes(y = inv_scale_function(Temp, scale_surface, shift_surface), shape = "Temp", color = "Temp"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_surface, max_first_surface), sec.axis = sec_axis(~scale_function(., scale_surface, shift_surface), name = "Temperature (°C)")) +
+  labs(x = "Days", y = "Salinity", color = "", shape = "") +
+  scale_color_manual(values = c("Salinity" = "lightskyblue4", "Temp" = "lightsalmon")) +
+  scale_shape_manual(values = c("Salinity" = 16, "Temp" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Crear gráfico para Subsurface
+plot_subsurface <- ggplot(e_data %>% filter(typeset2 == "Subsurface"), aes(x = Day)) +
+  geom_line(aes(y = Salinity, color = "Salinity")) +
+  geom_point(aes(y = Salinity, shape = "Salinity", color = "Salinity"), size = 3) +
+  facet_wrap(~typeset3, ncol = 4) +
+  geom_line(aes(y = inv_scale_function(Temp, scale_subsurface, shift_subsurface), color = "Temp")) +
+  geom_point(aes(y = inv_scale_function(Temp, scale_subsurface, shift_subsurface), shape = "Temp", color = "Temp"), size = 3) +
+  scale_x_continuous(breaks = seq(0, 50, 10), labels = seq(0, 50, 10), limits = c(0, 50)) +
+  scale_y_continuous(limits = c(min_first_subsurface, max_first_subsurface), sec.axis = sec_axis(~scale_function(., scale_subsurface, shift_subsurface), name = "Temperature (°C)")) +
+  labs(x = "Days", y = "Salinity", color = "", shape = "") +
+  scale_color_manual(values = c("Salinity" = "lightskyblue4", "Temp" = "lightsalmon")) +
+  scale_shape_manual(values = c("Salinity" = 16, "Temp" = 17)) +
+  theme(panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# Combinar gráficos
+pkpd_combined <- plot_surface / plot_subsurface
+print(pkpd_combined)
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Reordenar los niveles de la columna "typeset2"
+e_data$typeset2 <- factor(e_data$typeset2, levels = c("Surface", "Subsurface"))
+
+# --- Colores ---
+col_salinity <- "#053061"
+col_temp     <- "#D6604D"
+
+# --- Rango REAL de los datos crudos (ancla el eje secundario) ---
+raw_Temp_range_surface    <- range(e_data$Temp[e_data$typeset2 == "Surface"],    na.rm = TRUE)
+raw_Temp_range_subsurface <- range(e_data$Temp[e_data$typeset2 == "Subsurface"], na.rm = TRUE)
+
+# --- Calcular promedio y SD por Day y typeset2 (los 4 mesocosms juntos) ---
+salinity_data <- e_data %>%
+  filter(!is.na(Salinity)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(Salinity_mean = mean(Salinity, na.rm = TRUE),
+            Salinity_sd   = sd(Salinity, na.rm = TRUE),
+            .groups = 'drop') %>%
+  mutate(Salinity_sd = ifelse(is.na(Salinity_sd), 0, Salinity_sd)) %>%
+  arrange(Day)
+
+temp_data <- e_data %>%
+  filter(!is.na(Temp)) %>%
+  group_by(Day, typeset2) %>%
+  summarise(Temp_mean = mean(Temp, na.rm = TRUE),
+            Temp_sd   = sd(Temp, na.rm = TRUE),
+            .groups = 'drop') %>%
+  mutate(Temp_sd = ifelse(is.na(Temp_sd), 0, Temp_sd)) %>%
+  arrange(Day)
+
+# --- Separar por profundidad ---
+surface_Salinity    <- salinity_data %>% filter(typeset2 == "Surface")
+surface_Temp        <- temp_data     %>% filter(typeset2 == "Surface")
+subsurface_Salinity <- salinity_data %>% filter(typeset2 == "Subsurface")
+subsurface_Temp     <- temp_data     %>% filter(typeset2 == "Subsurface")
+
+# --- Funciones de escalado ---
+scale_to_range <- function(x, new_min, new_max, old_min, old_max) {
+  (x - old_min) / (old_max - old_min) * (new_max - new_min) + new_min
+}
+unscale_from_range <- function(x, original_min, original_max, scaled_min, scaled_max) {
+  (x - scaled_min) / (scaled_max - scaled_min) * (original_max - original_min) + original_min
+}
+
+# --- Suavizado LIVIANO (span bajo) que respeta transiciones abruptas reales (day 13 y 33) ---
+smooth_band <- function(data, day_col, mean_col, sd_col, span = 0.15) {
+  day_seq <- seq(min(data[[day_col]]), max(data[[day_col]]), length.out = 200)
+  d <- data.frame(Day = data[[day_col]],
+                   lo  = data[[mean_col]] - data[[sd_col]],
+                   mid = data[[mean_col]],
+                   hi  = data[[mean_col]] + data[[sd_col]])
+  fit_one <- function(y) {
+    m <- loess(y ~ Day, data = d, span = span)
+    predict(m, newdata = data.frame(Day = day_seq))
+  }
+  data.frame(Day = day_seq, lo = fit_one(d$lo), mid = fit_one(d$mid), hi = fit_one(d$hi))
+}
+
+# --- Generar bandas suavizadas ---
+surface_Salinity_s    <- smooth_band(surface_Salinity,    "Day", "Salinity_mean", "Salinity_sd", span = 0.15)
+surface_Temp_s        <- smooth_band(surface_Temp,        "Day", "Temp_mean",     "Temp_sd",     span = 0.15)
+subsurface_Salinity_s <- smooth_band(subsurface_Salinity, "Day", "Salinity_mean", "Salinity_sd", span = 0.15)
+subsurface_Temp_s     <- smooth_band(subsurface_Temp,     "Day", "Temp_mean",     "Temp_sd",     span = 0.15)
+
+# --- Rangos para eje Y de Salinity (basados en la banda completa) ---
+Salinity_range_surface    <- range(c(surface_Salinity_s$lo, surface_Salinity_s$hi), na.rm = TRUE)
+Salinity_range_subsurface <- range(c(subsurface_Salinity_s$lo, subsurface_Salinity_s$hi), na.rm = TRUE)
+
+# --- Escalar Temp usando el rango REAL de los datos crudos ---
+surface_Temp_s$mid_s <- scale_to_range(surface_Temp_s$mid, Salinity_range_surface[1], Salinity_range_surface[2], raw_Temp_range_surface[1], raw_Temp_range_surface[2])
+surface_Temp_s$lo_s  <- scale_to_range(surface_Temp_s$lo,  Salinity_range_surface[1], Salinity_range_surface[2], raw_Temp_range_surface[1], raw_Temp_range_surface[2])
+surface_Temp_s$hi_s  <- scale_to_range(surface_Temp_s$hi,  Salinity_range_surface[1], Salinity_range_surface[2], raw_Temp_range_surface[1], raw_Temp_range_surface[2])
+
+subsurface_Temp_s$mid_s <- scale_to_range(subsurface_Temp_s$mid, Salinity_range_subsurface[1], Salinity_range_subsurface[2], raw_Temp_range_subsurface[1], raw_Temp_range_subsurface[2])
+subsurface_Temp_s$lo_s  <- scale_to_range(subsurface_Temp_s$lo,  Salinity_range_subsurface[1], Salinity_range_subsurface[2], raw_Temp_range_subsurface[1], raw_Temp_range_subsurface[2])
+subsurface_Temp_s$hi_s  <- scale_to_range(subsurface_Temp_s$hi,  Salinity_range_subsurface[1], Salinity_range_subsurface[2], raw_Temp_range_subsurface[1], raw_Temp_range_subsurface[2])
+
+# --- Gráfico Surface ---
+plot_surface <- ggplot() +
+  geom_ribbon(data = surface_Salinity_s, aes(x = Day, ymin = lo,   ymax = hi,   fill = "Salinity"), alpha = 0.55) +
+  geom_ribbon(data = surface_Temp_s,     aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "Temp"), alpha = 0.55) +
+  geom_line(data = surface_Salinity_s, aes(x = Day, y = mid,   color = "Salinity"), linewidth = 1) +
+  geom_line(data = surface_Temp_s,     aes(x = Day, y = mid_s, color = "Temp"),     linewidth = 1) +
+  geom_vline(xintercept = c(13, 33), linetype = "dashed", color = "grey40", linewidth = 0.4) +
+  coord_cartesian(ylim = Salinity_range_surface) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = "Salinity",
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., raw_Temp_range_surface[1], raw_Temp_range_surface[2], Salinity_range_surface[1], Salinity_range_surface[2]),
+      name = "Temperature (°C)"
+    )
+  ) +
+  labs(x = "Days", title = "Surface", color = "", fill = "") +
+  scale_color_manual(values = c("Salinity" = col_salinity, "Temp" = col_temp)) +
+  scale_fill_manual(values = c("Salinity" = col_salinity, "Temp" = col_temp)) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+# --- Gráfico Subsurface ---
+plot_subsurface <- ggplot() +
+  geom_ribbon(data = subsurface_Salinity_s, aes(x = Day, ymin = lo,   ymax = hi,   fill = "Salinity"), alpha = 0.55) +
+  geom_ribbon(data = subsurface_Temp_s,     aes(x = Day, ymin = lo_s, ymax = hi_s, fill = "Temp"), alpha = 0.55) +
+  geom_line(data = subsurface_Salinity_s, aes(x = Day, y = mid,   color = "Salinity"), linewidth = 1) +
+  geom_line(data = subsurface_Temp_s,     aes(x = Day, y = mid_s, color = "Temp"),     linewidth = 1) +
+  geom_vline(xintercept = c(13, 33), linetype = "dashed", color = "grey40", linewidth = 0.4) +
+  coord_cartesian(ylim = Salinity_range_subsurface) +
+  scale_x_continuous(breaks = seq(0, 50, 10), limits = c(0, 50), expand = c(0, 0)) +
+  scale_y_continuous(
+    name = "Salinity",
+    sec.axis = sec_axis(
+      trans = ~unscale_from_range(., raw_Temp_range_subsurface[1], raw_Temp_range_subsurface[2], Salinity_range_subsurface[1], Salinity_range_subsurface[2]),
+      name = "Temperature (°C)"
+    )
+  ) +
+  labs(x = "Days", title = "Subsurface", color = "", fill = "") +
+  scale_color_manual(values = c("Salinity" = col_salinity, "Temp" = col_temp)) +
+  scale_fill_manual(values = c("Salinity" = col_salinity, "Temp" = col_temp)) +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(4, "pt"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+
+combined_plot <- plot_surface / plot_subsurface
+print(combined_plot)
+```
+
+
+
+
+
+
+
+
+```{r cars}
+library(ggpubr)
+figure<- ggarrange (nutri_a,nutri_b,
+                    labels = c("A","B"),
+                    ncol = 1, nrow = 2)
+figure  
+```
+

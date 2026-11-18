@@ -1,0 +1,1816 @@
+---
+title: "Relative_Abundance"
+author: "Edgart Flores"
+date: "2025-05-01"
+output: html_document
+---
+
+# Installation of functions
+```{r setup, include=FALSE}
+# Instalar pacman si no está instalado
+if (!require("pacman")) install.packages("pacman")
+
+# Cargar paquetes con pacman
+pacman::p_load(
+  # Tidyverse (incluye ggplot2, dplyr, tidyr, readr, etc.)
+  tidyverse,
+  
+  # Importación de datos
+  openxlsx, readxl, here, janitor,
+  
+  # Visualización
+  ggthemes, gridExtra, RColorBrewer, scales, cowplot, 
+  ggdendro, ggpubr, ggpmisc, ggsci, latex2exp,
+  
+  # Análisis estadístico y clustering
+  broom, vegan, pvclust, cluster, factoextra, 
+  multcompView, FD, ade4, gclus,
+  
+  # Utilidades
+  magrittr, reshape2, dendextend, graphics, devtools
+)
+
+# Paquetes que decidiste comentar
+# pacman::p_load(adespatial)
+``` 
+
+```{r}
+# Cargar datos y separar Surface y Bottom
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/combined_data_only_IPL_envriomental.csv")
+datos_surface <- datos_fusionados %>% filter(grepl("Surface", ID))
+datos_bottom <- datos_fusionados %>% filter(grepl("Bottom", ID))
+```
+
+```{r}
+# Ahora Surface (siguiendo el mismo patrón que Bottom)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(scales)
+
+# Agrupar columnas por clase de lípidos
+lipid_groups <- list(
+  PG = grep("^PG\\.", colnames(datos_surface), value = TRUE),
+  PE = grep("^PE\\.", colnames(datos_surface), value = TRUE),
+  PC = grep("^PC\\.", colnames(datos_surface), value = TRUE),
+  PME = grep("^PME\\.", colnames(datos_surface), value = TRUE),
+  PDME = grep("^PDME\\.", colnames(datos_surface), value = TRUE),
+  MGDG = grep("^MGDG\\.", colnames(datos_surface), value = TRUE),
+  DGDG = grep("^DGDG\\.", colnames(datos_surface), value = TRUE),
+  SQDG = grep("^SQDG\\.", colnames(datos_surface), value = TRUE),
+  DGTS = grep("^DGTS\\.", colnames(datos_surface), value = TRUE),
+  DGTA = grep("^DGTA\\.", colnames(datos_surface), value = TRUE),
+  DGCC = grep("^DGCC\\.", colnames(datos_surface), value = TRUE),
+  Other = grep("^(Gly\\.Cer\\.|PI\\.)", colnames(datos_surface), value = TRUE)
+)
+
+# Preparamos los datos calculando la suma de cada grupo
+datos_surface_processed <- datos_surface %>%
+  mutate(
+    Mesocosm = case_when(
+      grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+      grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+      grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+      grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+      TRUE ~ "Other"
+    ),
+    # Extraer número de día
+    Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+  )
+
+# Calculamos la suma de cada grupo de lípidos
+for (group_name in names(lipid_groups)) {
+  if (length(lipid_groups[[group_name]]) > 0) {
+    # Crear suma para cada grupo
+    datos_surface_processed[[group_name]] <- rowSums(datos_surface_processed[, lipid_groups[[group_name]], drop = FALSE], na.rm = TRUE)
+  } else {
+    # Si no hay columnas para este grupo, asignar cero
+    datos_surface_processed[[group_name]] <- 0
+  }
+}
+
+# Calcular el total para obtener porcentajes
+lipid_columns <- names(lipid_groups)
+datos_surface_processed$Total <- rowSums(datos_surface_processed[, lipid_columns], na.rm = TRUE)
+
+# Calcular porcentajes
+for (group_name in lipid_columns) {
+  datos_surface_processed[[group_name]] <- (datos_surface_processed[[group_name]] / datos_surface_processed$Total) * 100
+}
+
+# Ahora sí tenemos lipidos_surface_porcentajes
+lipidos_surface_porcentajes <- datos_surface_processed
+
+# Convertir a formato largo para graficar
+lipids_surface_for_plotting <- lipidos_surface_porcentajes %>%
+  # Extract columns already exists
+  # Convert to long format for plotting
+  pivot_longer(
+    cols = c(PG, PE, PC, PME, PDME, MGDG, DGDG, SQDG, DGTS, DGTA, DGCC, Other),
+    names_to = "Lipid_Category",
+    values_to = "Percentage"
+  )
+
+# Order factors to appear in the correct order
+lipids_surface_for_plotting$Lipid_Category <- factor(
+  lipids_surface_for_plotting$Lipid_Category,
+  levels = c("PG", "PE", "PC", "PME", "PDME", "MGDG", "DGDG", "SQDG", "DGTS", "DGTA", "DGCC", "Other")
+)
+
+# Create a colorblind-friendly RdBu palette with more subtle tones
+# Get a modified RdBu palette with 12 colors
+lipid_colors <- colorRampPalette(brewer.pal(11, "RdBu"))(12)
+
+# Function to create plots for each mesocosm (CON MARCO)
+plot_mesocosm <- function(mesocosm_number) {
+  filtered_data <- lipids_surface_for_plotting %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  # Check if there's data
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  # Get the unique days in the dataset
+  days <- sort(unique(filtered_data$Day))
+  
+  # Create the plot using numeric x-axis instead of factor
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Lipid_Category)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+    scale_fill_manual(values = lipid_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+      labels = function(x) ifelse(x %% 10 == 0, paste("Day", x), ""),  # Only show labels for multiples of 10
+      limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+    ) +
+    labs(
+      title = paste("Lipid Composition in Mesocosm", mesocosm_number, "(Surface)"),
+      x = "",  # Remove x-axis title
+      y = "Percentage (%)",
+      fill = "Lipid Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      # Agregar el marco/borde
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+      # Asegurar que los ejes también tienen color
+      axis.line = element_line(colour = "black", linewidth = 0.5)
+    )
+}
+
+# Create individual plots
+plot_surface_meso6 <- plot_mesocosm(6)
+plot_surface_meso7 <- plot_mesocosm(7)
+plot_surface_meso5 <- plot_mesocosm(5)
+plot_surface_meso8 <- plot_mesocosm(8)
+
+combined_surface_plot <- grid.arrange(
+  plot_surface_meso6, plot_surface_meso7,  # Primera fila: Mesocosm 6 y 7
+  plot_surface_meso5, plot_surface_meso8,  # Segunda fila: Mesocosm 5 y 8
+  ncol = 2, nrow = 2,
+  top = "Lipid Composition in Surface Samples"
+)
+print(combined_surface_plot)
+```
+```{r}
+# Calcular el promedio de los cuatro mesocosmos para cada día y categoría de lípido (SURFACE)
+lipids_surface_average <- lipids_surface_for_plotting %>%
+  # Agrupar por día y categoría de lípido
+  group_by(Day, Lipid_Category) %>%
+  # Calcular el promedio del porcentaje
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  # Asegurarnos que cada día suma 100%
+  group_by(Day) %>%
+  mutate(
+    # Calcular la suma total por día
+    Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+    # Ajustar el porcentaje para asegurar que sume 100%
+    Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100
+  ) %>%
+  ungroup()
+
+# Verificar que cada día suma 100%
+sum_check_surface <- lipids_surface_average %>%
+  group_by(Day) %>%
+  summarise(Sum_Percentage = sum(Adjusted_Percentage, na.rm = TRUE))
+print(sum_check_surface)
+
+# Get the unique days in the dataset
+days <- sort(unique(lipids_surface_average$Day))
+
+# Crear el plot promedio para superficie con espacios entre barras
+average_surface_plot <- ggplot(lipids_surface_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+  scale_fill_manual(values = lipid_colors) +
+  scale_x_continuous(
+    breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+    labels = function(x) ifelse(x %% 10 == 0, x, ""),  # Only show labels for multiples of 10
+    limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+  ) +
+  labs(
+    title = "Average Lipid Composition Across All Mesocosms (Surface)",
+    x = "",
+    y = "Percentage (%)",
+    fill = "Lipid Category"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+# Guardar el plot para usarlo después
+surface_plot <- average_surface_plot
+print(surface_plot)
+```
+
+# Ahora Bottom
+
+```{r}
+# Ahora Bottom CON MARCOS
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(scales)
+
+# Agrupar columnas por clase de lípidos
+lipid_groups <- list(
+  PG = grep("^PG\\.", colnames(datos_bottom), value = TRUE),
+  PE = grep("^PE\\.", colnames(datos_bottom), value = TRUE),
+  PC = grep("^PC\\.", colnames(datos_bottom), value = TRUE),
+  PME = grep("^PME\\.", colnames(datos_bottom), value = TRUE),
+  PDME = grep("^PDME\\.", colnames(datos_bottom), value = TRUE),
+  MGDG = grep("^MGDG\\.", colnames(datos_bottom), value = TRUE),
+  DGDG = grep("^DGDG\\.", colnames(datos_bottom), value = TRUE),
+  SQDG = grep("^SQDG\\.", colnames(datos_bottom), value = TRUE),
+  DGTS = grep("^DGTS\\.", colnames(datos_bottom), value = TRUE),
+  DGTA = grep("^DGTA\\.", colnames(datos_bottom), value = TRUE),
+  DGCC = grep("^DGCC\\.", colnames(datos_bottom), value = TRUE),
+  Other = grep("^(Gly\\.Cer\\.|PI\\.)", colnames(datos_bottom), value = TRUE)
+)
+
+# Preparamos los datos calculando la suma de cada grupo
+datos_bottom_processed <- datos_bottom %>%
+  mutate(
+    Mesocosm = case_when(
+      grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+      grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+      grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+      grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+      TRUE ~ "Other"
+    ),
+    # Extraer número de día
+    Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+  )
+
+# Calculamos la suma de cada grupo de lípidos
+for (group_name in names(lipid_groups)) {
+  if (length(lipid_groups[[group_name]]) > 0) {
+    # Crear suma para cada grupo
+    datos_bottom_processed[[group_name]] <- rowSums(datos_bottom_processed[, lipid_groups[[group_name]], drop = FALSE], na.rm = TRUE)
+  } else {
+    # Si no hay columnas para este grupo, asignar cero
+    datos_bottom_processed[[group_name]] <- 0
+  }
+}
+
+# Calcular el total para obtener porcentajes
+lipid_columns <- names(lipid_groups)
+datos_bottom_processed$Total <- rowSums(datos_bottom_processed[, lipid_columns], na.rm = TRUE)
+
+# Calcular porcentajes
+for (group_name in lipid_columns) {
+  datos_bottom_processed[[group_name]] <- (datos_bottom_processed[[group_name]] / datos_bottom_processed$Total) * 100
+}
+
+# Convertir a formato largo para graficar
+lipids_bottom_for_plotting <- datos_bottom_processed %>%
+  select(ID, Mesocosm, Day, all_of(lipid_columns)) %>%
+  pivot_longer(
+    cols = all_of(lipid_columns),
+    names_to = "Lipid_Category",
+    values_to = "Percentage"
+  )
+
+# Ordenar factores para que aparezcan en el orden correcto
+lipids_bottom_for_plotting$Lipid_Category <- factor(
+  lipids_bottom_for_plotting$Lipid_Category,
+  levels = lipid_columns
+)
+
+# Crear una paleta de colores
+lipid_colors <- colorRampPalette(brewer.pal(11, "RdBu"))(length(lipid_columns))
+
+# Función para crear gráficos para cada mesocosm con espacios entre barras Y MARCOS
+plot_mesocosm_bottom <- function(mesocosm_number) {
+  filtered_data <- lipids_bottom_for_plotting %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  # Verificar si hay datos
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  # Get the unique days in the dataset
+  days <- sort(unique(filtered_data$Day))
+  
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Lipid_Category)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+    scale_fill_manual(values = lipid_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+      labels = function(x) ifelse(x %% 10 == 0, x, ""),  # Only show labels for multiples of 10
+      limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+    ) +
+    labs(
+      title = paste("Lipid Composition in Mesocosm", mesocosm_number, "(Bottom)"),
+      x = "",  # Eliminar título del eje x
+      y = "Percentage (%)",
+      fill = "Lipid Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      # ESTAS SON LAS LÍNEAS IMPORTANTES PARA LOS MARCOS
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+      axis.line = element_line(colour = "black", linewidth = 0.5)
+    )
+}
+
+# Crear gráficos individuales
+plot_bottom_meso5 <- plot_mesocosm_bottom(5)
+plot_bottom_meso6 <- plot_mesocosm_bottom(6)
+plot_bottom_meso7 <- plot_mesocosm_bottom(7)
+plot_bottom_meso8 <- plot_mesocosm_bottom(8)
+
+# Combinar los gráficos
+combined_bottom_plot <- grid.arrange(plot_bottom_meso6, plot_bottom_meso7, 
+                                     plot_bottom_meso5, plot_bottom_meso8, 
+                                    ncol = 2, nrow = 2,
+                                    top = "Lipid Composition in Bottom Samples")
+print(combined_bottom_plot)
+```
+
+```{r}
+# Calcular el promedio de los cuatro mesocosmos para cada día y categoría de lípido (BOTTOM)
+lipids_bottom_average <- lipids_bottom_for_plotting %>%
+  # Agrupar por día y categoría de lípido
+  group_by(Day, Lipid_Category) %>%
+  # Calcular el promedio del porcentaje
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  # Asegurarnos que cada día suma 100%
+  group_by(Day) %>%
+  mutate(
+    # Calcular la suma total por día
+    Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+    # Ajustar el porcentaje para asegurar que sume 100%
+    Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100
+  ) %>%
+  ungroup()
+
+# Verificar que cada día suma 100%
+sum_check_bottom <- lipids_bottom_average %>%
+  group_by(Day) %>%
+  summarise(Sum_Percentage = sum(Adjusted_Percentage, na.rm = TRUE))
+print(sum_check_bottom)
+
+# Get the unique days in the dataset
+days <- sort(unique(lipids_bottom_average$Day))
+
+# Crear el plot promedio para los datos de bottom con espacios entre barras
+average_bottom_plot <- ggplot(lipids_bottom_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+  scale_fill_manual(values = lipid_colors) +
+  scale_x_continuous(
+    breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+    labels = function(x) ifelse(x %% 10 == 0, x, ""),  # Only show labels for multiples of 10
+    limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+  ) +
+  labs(
+    title = "Average Lipid Composition Across All Mesocosms (Bottom)",
+    x = "",
+    y = "Percentage (%)",
+    fill = "Lipid Category"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+# Guardar el plot para usarlo después
+bottom_plot <- average_bottom_plot
+print(bottom_plot)
+```
+
+#Urnir figuras promedio surface vs subsurface
+
+
+```{r}
+# Orden: 5 fosfolípidos (rojos), 3 glicolípidos (azules), 3 betaínas (morados), 1 Other (gris)
+lipid_order <- c("PG", "PE", "PC", "PME", "PDME",   # Phospholipids
+                  "MGDG", "DGDG", "SQDG",            # Glycolipids
+                  "DGTS", "DGTA", "DGCC",             # Betaine lipids
+                  "Other")
+
+lipid_groups_palette <- c(
+  # Phospholipids - reds
+  "PG"    = "#a11d1d",
+  "PE"    = "#c72626",
+  "PC"    = "#e33a3a",
+  "PME"   = "#ed7777",
+  "PDME"  = "#f7b2b2",
+  # Glycolipids - blues
+  "MGDG"  = "#2e75b6",
+  "DGDG"  = "#5c9ad1",
+  "SQDG"  = "#9fc5e8",
+  # Betaine lipids - purples
+  "DGTS"  = "#6a329f",
+  "DGTA"  = "#8e7cc3",
+  "DGCC"  = "#b4a7d6",
+  # Other - grey
+  "Other" = "#b0b0b0"
+)
+```
+
+```{r}
+lipids_surface_for_plotting$Lipid_Category <- factor(lipids_surface_for_plotting$Lipid_Category, levels = lipid_order)
+lipids_bottom_for_plotting$Lipid_Category  <- factor(lipids_bottom_for_plotting$Lipid_Category,  levels = lipid_order)
+
+lipids_surface_average$Lipid_Category <- factor(lipids_surface_average$Lipid_Category, levels = lipid_order)
+lipids_bottom_average$Lipid_Category  <- factor(lipids_bottom_average$Lipid_Category,  levels = lipid_order)
+```
+
+
+```{r}
+phase_breaks <- c(11, 19, 37)
+
+average_surface_plot <- ggplot(lipids_surface_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = lipid_groups_palette) +
+  scale_x_continuous(
+    breaks = seq(0, max(days) + 10, by = 10),
+    labels = function(x) ifelse(x %% 10 == 0, x, ""),
+    limits = c(min(days) - 2, max(days) + 2)
+  ) +
+  labs(
+    title = "Average Lipid Composition Across All Mesocosms (Surface)",
+    x = "",
+    y = "Relative Abundance (%)",
+    fill = "Lipid Category"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+average_bottom_plot <- ggplot(lipids_bottom_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = lipid_groups_palette) +
+  scale_x_continuous(
+    breaks = seq(0, max(days) + 10, by = 10),
+    labels = function(x) ifelse(x %% 10 == 0, x, ""),
+    limits = c(min(days) - 2, max(days) + 2)
+  ) +
+  labs(
+    title = "Average Lipid Composition Across All Mesocosms (Subsurface)",
+    x = "",
+    y = "Relative Abundance (%)",
+    fill = "Lipid Category"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+surface_plot <- average_surface_plot
+bottom_plot  <- average_bottom_plot
+
+print(surface_plot)
+print(bottom_plot)
+```
+```{r}
+if (!require("patchwork")) install.packages("patchwork")
+library(patchwork)
+
+# --- Usar variables de días independientes para evitar que se sobrescriban ---
+days_surface <- sort(unique(lipids_surface_average$Day))
+days_bottom  <- sort(unique(lipids_bottom_average$Day))
+
+phase_breaks <- c(11, 19, 37)
+
+# --- Panel A: Surface (sin eje X, va arriba) ---
+surface_plot_combined <- ggplot(lipids_surface_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = lipid_groups_palette) +
+  scale_x_continuous(
+    breaks = seq(0, max(days_surface) + 10, by = 10),
+    limits = c(min(days_surface) - 2, max(days_surface) + 2)
+  ) +
+  labs(x = NULL, y = "Relative Abundance (%)", fill = "Lipid Category") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),      # sin etiquetas de día arriba
+    axis.ticks.x = element_blank(),
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+# --- Panel B: Subsurface (con eje X, va abajo) ---
+bottom_plot_combined <- ggplot(lipids_bottom_average, aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = lipid_groups_palette) +
+  scale_x_continuous(
+    breaks = seq(0, max(days_bottom) + 10, by = 10),
+    limits = c(min(days_bottom) - 2, max(days_bottom) + 2)
+  ) +
+  labs(x = "Day", y = "Relative Abundance (%)", fill = "Lipid Category") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    legend.position = "right",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+# --- Franja delgada entre A y B con las etiquetas de fase ---
+phase_positions <- c(mean(c(0, 11)), mean(c(11, 19)), mean(c(19, 37)), mean(c(37, max(days_bottom) + 2)))
+phase_labels_plot <- ggplot() +
+  annotate("text", x = phase_positions, y = 0,
+           label = c("Phase I", "Phase II", "Phase III", "Phase IV"),
+           size = 4, fontface = "bold") +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_x_continuous(limits = c(min(days_bottom) - 2, max(days_bottom) + 2)) +
+  theme_void()
+
+# --- Combinar todo con patchwork ---
+final_lipid_plot <- surface_plot_combined / phase_labels_plot / bottom_plot_combined +
+  plot_layout(heights = c(10, 0.6, 10), guides = "collect") &
+  theme(legend.position = "right")
+
+final_lipid_plot <- final_lipid_plot +
+  plot_annotation(tag_levels = list(c("A", "", "B"))) &
+  theme(plot.tag = element_text(size = 14, face = "bold"))
+
+print(final_lipid_plot)
+
+# Guardar en alta resolución para el paper
+ggsave("Figure3_Lipid_Composition_Surface_Subsurface.tiff",
+       final_lipid_plot, width = 8, height = 9, dpi = 300, compression = "lzw")
+ggsave("Figure3_Lipid_Composition_Surface_Subsurface.pdf",
+       final_lipid_plot, width = 8, height = 9)
+```
+
+
+
+```{r}
+# ============================================================
+# 0. LIBRERÍAS
+# ============================================================
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  tidyverse, openxlsx, readxl, here, janitor,
+  ggthemes, gridExtra, RColorBrewer, scales, cowplot,
+  ggdendro, ggpubr, ggpmisc, ggsci, latex2exp,
+  broom, vegan, pvclust, cluster, factoextra,
+  multcompView, FD, ade4, gclus,
+  magrittr, reshape2, dendextend, graphics, devtools,
+  patchwork
+)
+
+# ============================================================
+# 1. CARGAR DATOS
+# ============================================================
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/combined_data_only_IPL_envriomental.csv")
+datos_surface <- datos_fusionados %>% filter(grepl("Surface", ID))
+datos_bottom  <- datos_fusionados %>% filter(grepl("Bottom", ID))
+
+# ============================================================
+# 2. PALETA Y ORDEN DE CATEGORÍAS (agrupada por clase biológica)
+# ============================================================
+lipid_order <- c("PG", "PE", "PC", "PME", "PDME",   # Phospholipids
+                  "MGDG", "DGDG", "SQDG",            # Glycolipids
+                  "DGTS", "DGTA", "DGCC",             # Betaine lipids
+                  "Other")
+
+lipid_groups_palette <- c(
+  "PG"    = "#a11d1d", "PE"   = "#c72626", "PC"   = "#e33a3a",
+  "PME"   = "#ed7777", "PDME" = "#f7b2b2",
+  "MGDG"  = "#2e75b6", "DGDG" = "#5c9ad1", "SQDG" = "#9fc5e8",
+  "DGTS"  = "#6a329f", "DGTA" = "#8e7cc3", "DGCC" = "#b4a7d6",
+  "Other" = "#b0b0b0"
+)
+
+class_colors <- c("Phospholipids" = "#7a0000", "Glycolipids" = "#003d7a", "Betaine_lipids" = "#3d0066")
+
+# ============================================================
+# 3. PROCESAR SURFACE -> lipids_surface_for_plotting / lipids_surface_average
+# ============================================================
+lipid_groups_surface <- list(
+  PG = grep("^PG\\.", colnames(datos_surface), value = TRUE),
+  PE = grep("^PE\\.", colnames(datos_surface), value = TRUE),
+  PC = grep("^PC\\.", colnames(datos_surface), value = TRUE),
+  PME = grep("^PME\\.", colnames(datos_surface), value = TRUE),
+  PDME = grep("^PDME\\.", colnames(datos_surface), value = TRUE),
+  MGDG = grep("^MGDG\\.", colnames(datos_surface), value = TRUE),
+  DGDG = grep("^DGDG\\.", colnames(datos_surface), value = TRUE),
+  SQDG = grep("^SQDG\\.", colnames(datos_surface), value = TRUE),
+  DGTS = grep("^DGTS\\.", colnames(datos_surface), value = TRUE),
+  DGTA = grep("^DGTA\\.", colnames(datos_surface), value = TRUE),
+  DGCC = grep("^DGCC\\.", colnames(datos_surface), value = TRUE),
+  Other = grep("^(Gly\\.Cer\\.|PI\\.)", colnames(datos_surface), value = TRUE)
+)
+
+datos_surface_processed <- datos_surface %>%
+  mutate(
+    Mesocosm = case_when(
+      grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+      grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+      grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+      grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+      TRUE ~ "Other"
+    ),
+    Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+  )
+
+for (group_name in names(lipid_groups_surface)) {
+  if (length(lipid_groups_surface[[group_name]]) > 0) {
+    datos_surface_processed[[group_name]] <- rowSums(datos_surface_processed[, lipid_groups_surface[[group_name]], drop = FALSE], na.rm = TRUE)
+  } else {
+    datos_surface_processed[[group_name]] <- 0
+  }
+}
+
+lipid_columns <- names(lipid_groups_surface)
+datos_surface_processed$Total <- rowSums(datos_surface_processed[, lipid_columns], na.rm = TRUE)
+for (group_name in lipid_columns) {
+  datos_surface_processed[[group_name]] <- (datos_surface_processed[[group_name]] / datos_surface_processed$Total) * 100
+}
+
+lipids_surface_for_plotting <- datos_surface_processed %>%
+  pivot_longer(cols = all_of(lipid_columns), names_to = "Lipid_Category", values_to = "Percentage")
+
+lipids_surface_for_plotting$Lipid_Category <- factor(lipids_surface_for_plotting$Lipid_Category, levels = lipid_order)
+
+lipids_surface_average <- lipids_surface_for_plotting %>%
+  group_by(Day, Lipid_Category) %>%
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Day) %>%
+  mutate(Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+         Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100) %>%
+  ungroup()
+
+lipids_surface_average$Lipid_Category <- factor(lipids_surface_average$Lipid_Category, levels = lipid_order)
+
+# ============================================================
+# 4. PROCESAR BOTTOM -> lipids_bottom_for_plotting / lipids_bottom_average
+# ============================================================
+lipid_groups_bottom <- list(
+  PG = grep("^PG\\.", colnames(datos_bottom), value = TRUE),
+  PE = grep("^PE\\.", colnames(datos_bottom), value = TRUE),
+  PC = grep("^PC\\.", colnames(datos_bottom), value = TRUE),
+  PME = grep("^PME\\.", colnames(datos_bottom), value = TRUE),
+  PDME = grep("^PDME\\.", colnames(datos_bottom), value = TRUE),
+  MGDG = grep("^MGDG\\.", colnames(datos_bottom), value = TRUE),
+  DGDG = grep("^DGDG\\.", colnames(datos_bottom), value = TRUE),
+  SQDG = grep("^SQDG\\.", colnames(datos_bottom), value = TRUE),
+  DGTS = grep("^DGTS\\.", colnames(datos_bottom), value = TRUE),
+  DGTA = grep("^DGTA\\.", colnames(datos_bottom), value = TRUE),
+  DGCC = grep("^DGCC\\.", colnames(datos_bottom), value = TRUE),
+  Other = grep("^(Gly\\.Cer\\.|PI\\.)", colnames(datos_bottom), value = TRUE)
+)
+
+datos_bottom_processed <- datos_bottom %>%
+  mutate(
+    Mesocosm = case_when(
+      grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+      grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+      grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+      grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+      TRUE ~ "Other"
+    ),
+    Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+  )
+
+for (group_name in names(lipid_groups_bottom)) {
+  if (length(lipid_groups_bottom[[group_name]]) > 0) {
+    datos_bottom_processed[[group_name]] <- rowSums(datos_bottom_processed[, lipid_groups_bottom[[group_name]], drop = FALSE], na.rm = TRUE)
+  } else {
+    datos_bottom_processed[[group_name]] <- 0
+  }
+}
+
+datos_bottom_processed$Total <- rowSums(datos_bottom_processed[, lipid_columns], na.rm = TRUE)
+for (group_name in lipid_columns) {
+  datos_bottom_processed[[group_name]] <- (datos_bottom_processed[[group_name]] / datos_bottom_processed$Total) * 100
+}
+
+lipids_bottom_for_plotting <- datos_bottom_processed %>%
+  select(ID, Mesocosm, Day, all_of(lipid_columns)) %>%
+  pivot_longer(cols = all_of(lipid_columns), names_to = "Lipid_Category", values_to = "Percentage")
+
+lipids_bottom_for_plotting$Lipid_Category <- factor(lipids_bottom_for_plotting$Lipid_Category, levels = lipid_order)
+
+lipids_bottom_average <- lipids_bottom_for_plotting %>%
+  group_by(Day, Lipid_Category) %>%
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Day) %>%
+  mutate(Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+         Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100) %>%
+  ungroup()
+
+lipids_bottom_average$Lipid_Category <- factor(lipids_bottom_average$Lipid_Category, levels = lipid_order)
+
+# ============================================================
+# 5. CONCENTRACIONES TOTALES POR CLASE AMPLIA (Phospho / Glyco / Betaine)
+# ============================================================
+compute_class_totals <- function(datos_raw, lipid_groups) {
+  df <- datos_raw %>%
+    mutate(
+      Mesocosm = case_when(
+        grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+        grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+        grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+        grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+        TRUE ~ "Other"
+      ),
+      Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+    )
+
+  df$Phospholipids  <- rowSums(df[, c(lipid_groups$PG, lipid_groups$PE, lipid_groups$PC,
+                                       lipid_groups$PME, lipid_groups$PDME)], na.rm = TRUE)
+  df$Glycolipids    <- rowSums(df[, c(lipid_groups$MGDG, lipid_groups$DGDG, lipid_groups$SQDG)], na.rm = TRUE)
+  df$Betaine_lipids <- rowSums(df[, c(lipid_groups$DGTS, lipid_groups$DGTA, lipid_groups$DGCC)], na.rm = TRUE)
+
+  df %>% select(ID, Mesocosm, Day, Phospholipids, Glycolipids, Betaine_lipids)
+}
+
+class_totals_surface <- compute_class_totals(datos_surface, lipid_groups_surface) %>%
+  group_by(Day) %>%
+  summarise(
+    Phospholipids  = mean(Phospholipids, na.rm = TRUE),
+    Glycolipids    = mean(Glycolipids, na.rm = TRUE),
+    Betaine_lipids = mean(Betaine_lipids, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(Phospholipids, Glycolipids, Betaine_lipids),
+               names_to = "Class", values_to = "Total_Concentration") %>%
+  mutate(Total_Concentration = Total_Concentration / 1000)  # ng/L -> µg/L
+
+class_totals_bottom <- compute_class_totals(datos_bottom, lipid_groups_bottom) %>%
+  group_by(Day) %>%
+  summarise(
+    Phospholipids  = mean(Phospholipids, na.rm = TRUE),
+    Glycolipids    = mean(Glycolipids, na.rm = TRUE),
+    Betaine_lipids = mean(Betaine_lipids, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(Phospholipids, Glycolipids, Betaine_lipids),
+               names_to = "Class", values_to = "Total_Concentration") %>%
+  mutate(Total_Concentration = Total_Concentration / 1000)  # ng/L -> µg/L
+
+max_conc_global <- max(class_totals_surface$Total_Concentration,
+                        class_totals_bottom$Total_Concentration, na.rm = TRUE)
+
+class_totals_surface <- class_totals_surface %>%
+  mutate(Scaled_Concentration = (Total_Concentration / max_conc_global) * 100)
+
+class_totals_bottom <- class_totals_bottom %>%
+  mutate(Scaled_Concentration = (Total_Concentration / max_conc_global) * 100)
+
+# ============================================================
+# 6. PANELES (Surface y Bottom) CON BARRAS + LÍNEAS + EJE Y SECUNDARIO
+# ============================================================
+phase_breaks  <- c(11, 19, 37)
+days_surface  <- sort(unique(lipids_surface_average$Day))
+days_bottom   <- sort(unique(lipids_bottom_average$Day))
+
+surface_plot_combined <- ggplot() +
+  geom_bar(data = lipids_surface_average,
+           aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category),
+           stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  geom_line(data = class_totals_surface,
+            aes(x = Day, y = Scaled_Concentration, color = Class, group = Class),
+            linewidth = 0.9) +
+  geom_point(data = class_totals_surface,
+             aes(x = Day, y = Scaled_Concentration, color = Class), size = 1.8) +
+  scale_fill_manual(values = lipid_groups_palette, name = "Lipid Category") +
+  scale_color_manual(values = class_colors, name = "Total Concentration") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_surface) + 10, by = 10),
+    limits = c(min(days_surface) - 2, max(days_surface) + 2)
+  ) +
+  scale_y_continuous(
+    name = "Relative Abundance (%)",
+    sec.axis = sec_axis(~ . * max_conc_global / 100,
+                         name = expression(paste("Total Concentration (", mu, "g L"^-1, ")")))
+  ) +
+  labs(x = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+bottom_plot_combined <- ggplot() +
+  geom_bar(data = lipids_bottom_average,
+           aes(x = Day, y = Adjusted_Percentage, fill = Lipid_Category),
+           stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  geom_line(data = class_totals_bottom,
+            aes(x = Day, y = Scaled_Concentration, color = Class, group = Class),
+            linewidth = 0.9) +
+  geom_point(data = class_totals_bottom,
+             aes(x = Day, y = Scaled_Concentration, color = Class), size = 1.8) +
+  scale_fill_manual(values = lipid_groups_palette, name = "Lipid Category") +
+  scale_color_manual(values = class_colors, name = "Total Concentration") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_bottom) + 10, by = 10),
+    limits = c(min(days_bottom) - 2, max(days_bottom) + 2)
+  ) +
+  scale_y_continuous(
+    name = "Relative Abundance (%)",
+    sec.axis = sec_axis(~ . * max_conc_global / 100,
+                         name = expression(paste("Total Concentration (", mu, "g L"^-1, ")")))
+  ) +
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+# ============================================================
+# 7. FRANJA DE FASES (ARRIBA) + ENSAMBLAJE FINAL CON PATCHWORK
+# ============================================================
+phase_positions <- c(mean(c(0, 11)), mean(c(11, 19)), mean(c(19, 37)),
+                      mean(c(37, max(days_bottom) + 2)))
+
+phase_labels_plot <- ggplot() +
+  annotate("text", x = phase_positions, y = 0,
+           label = c("Phase I", "Phase II", "Phase III", "Phase IV"),
+           size = 4, fontface = "bold") +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_x_continuous(limits = c(min(days_bottom) - 2, max(days_bottom) + 2)) +
+  theme_void()
+
+final_lipid_plot <- phase_labels_plot / surface_plot_combined / bottom_plot_combined +
+  plot_layout(heights = c(0.5, 10, 10), guides = "collect") &
+  theme(legend.position = "right")
+
+final_lipid_plot <- final_lipid_plot +
+  plot_annotation(tag_levels = list(c("", "A", "B"))) &
+  theme(plot.tag = element_text(size = 14, face = "bold"))
+
+print(final_lipid_plot)
+
+# --- ggsave() se agrega solo cuando confirmes que esta es la versión final ---
+```
+
+# We have improved the color scale thanks to the co-authors’ comments.
+
+```{r}
+# Combinar los gráficos de manera más simple
+library(gridExtra)
+
+# Ajustar los títulos
+surface_plot <- average_surface_plot + labs(title = "Surface")
+bottom_plot <- average_bottom_plot + labs(title = "Bottom") 
+
+# Combinar los gráficos uno encima del otro
+combined_plots <- grid.arrange(
+  surface_plot, 
+  bottom_plot, 
+  ncol = 1,
+  top = "Comparison of Lipid Composition in Surface vs Bottom Samples"
+)
+
+# Mostrar el gráfico combinado
+print(combined_plots)
+```
+
+# comparison
+
+```{r}
+# Combinar todos los gráficos en un solo layout
+combined_all_plots <- grid.arrange(
+  # Primera fila - Surface
+  plot_surface_meso6, plot_surface_meso7, plot_surface_meso5, plot_surface_meso8,
+  # Segunda fila - Bottom
+  plot_bottom_meso6, plot_bottom_meso7, plot_bottom_meso5, plot_bottom_meso8,
+  ncol = 4, nrow = 2,
+  top = "Lipid Composition in All Samples",
+  left = grid::textGrob("Surface\n\n\n\nBottom", rot = 90)
+)
+print(combined_all_plots)
+
+# Alternativa con etiquetas más claras:
+combined_all_plots_labeled <- grid.arrange(
+  # Agregar un espacio para texto entre las filas
+  arrangeGrob(
+    arrangeGrob(
+      plot_surface_meso6, plot_surface_meso7, plot_surface_meso5, plot_surface_meso8,
+      ncol = 4, top = "Surface"
+    ),
+    arrangeGrob(
+      plot_bottom_meso6, plot_bottom_meso7, plot_bottom_meso5, plot_bottom_meso8,
+      ncol = 4, top = "Bottom"
+    ),
+    nrow = 2,
+    heights = c(1, 1)
+  ),
+  top = "Lipid Composition in Surface and Bottom Samples"
+)
+print(combined_all_plots_labeled)
+```
+
+```{r}
+# Función para crear gráficos para cada mesocosm (CON MARCO)
+plot_mesocosm <- function(mesocosm_number) {
+  filtered_data <- lipids_surface_for_plotting %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  # Check if there's data
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  # Get the unique days in the dataset
+  days <- sort(unique(filtered_data$Day))
+  
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Lipid_Category)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+    scale_fill_manual(values = lipid_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+      labels = function(x) ifelse(x %% 10 == 0, paste("Day", x), ""),  # Only show labels for multiples of 10
+      limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+    ) +
+    labs(
+      title = paste("Lipid Composition in Mesocosm", mesocosm_number),
+      x = "",  # Remove x-axis title
+      y = "Percentage (%)",
+      fill = "Lipid Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      # Agregar el marco/borde
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+      # Asegurar que los ejes también tienen color
+      axis.line = element_line(colour = "black", linewidth = 0.5)
+    )
+}
+
+# Función para crear gráficos para cada mesocosm (CON MARCO) - Bottom
+plot_mesocosm_bottom <- function(mesocosm_number) {
+  filtered_data <- lipids_bottom_for_plotting %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  # Verificar si hay datos
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  # Get the unique days in the dataset
+  days <- sort(unique(filtered_data$Day))
+  
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Lipid_Category)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +  # Width less than 2 creates gaps
+    scale_fill_manual(values = lipid_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),  # Show ticks every 10 days
+      labels = function(x) ifelse(x %% 10 == 0, x, ""),  # Only show labels for multiples of 10
+      limits = c(min(days) - 2, max(days) + 2)  # Add space at edges
+    ) +
+    labs(
+      title = paste("Lipid Composition in Mesocosm", mesocosm_number, "(Bottom)"),
+      x = "",  # Eliminar título del eje x
+      y = "Percentage (%)",
+      fill = "Lipid Category"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),  # Horizontal labels
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      # Agregar el marco/borde
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+      # Asegurar que los ejes también tienen color
+      axis.line = element_line(colour = "black", linewidth = 0.5)
+    )
+}
+
+# Recrear los gráficos individuales
+plot_surface_meso5 <- plot_mesocosm(5)
+plot_surface_meso6 <- plot_mesocosm(6)
+plot_surface_meso7 <- plot_mesocosm(7)
+plot_surface_meso8 <- plot_mesocosm(8)
+
+plot_bottom_meso5 <- plot_mesocosm_bottom(5)
+plot_bottom_meso6 <- plot_mesocosm_bottom(6)
+plot_bottom_meso7 <- plot_mesocosm_bottom(7)
+plot_bottom_meso8 <- plot_mesocosm_bottom(8)
+
+# Combinar todos los gráficos en un solo layout (CON MARCOS)
+combined_all_plots <- grid.arrange(
+  # Primera fila - Surface
+  plot_surface_meso6, plot_surface_meso7, plot_surface_meso5, plot_surface_meso8,
+  # Segunda fila - Bottom
+  plot_bottom_meso6, plot_bottom_meso7, plot_bottom_meso5, plot_bottom_meso8,
+  ncol = 4, nrow = 2,
+  top = "Lipid Composition in All Samples",
+  left = grid::textGrob("Surface\n\n\n\nBottom", rot = 90)
+)
+print(combined_all_plots)
+
+# Alternativa con etiquetas más claras (CON MARCOS):
+combined_all_plots_labeled <- grid.arrange(
+  # Agregar un espacio para texto entre las filas
+  arrangeGrob(
+    arrangeGrob(
+      plot_surface_meso6, plot_surface_meso7, plot_surface_meso5, plot_surface_meso8,
+      ncol = 4, top = "Surface"
+    ),
+    arrangeGrob(
+      plot_bottom_meso6, plot_bottom_meso7, plot_bottom_meso5, plot_bottom_meso8,
+      ncol = 4, top = "Bottom"
+    ),
+    nrow = 2,
+    heights = c(1, 1)
+  ),
+  top = "Lipid Composition in Surface and Bottom Samples"
+)
+print(combined_all_plots_labeled)
+
+# Guardar la visualización
+#ggsave("lipids_surface_bottom_framed.png", 
+#       plot = combined_all_plots_labeled, 
+#       width = 24, 
+#       height = 14, 
+#       dpi = 300)
+```
+
+
+
+
+
+
+
+
+
+
+
+# Ahora con genes
+
+#---------------------------------------
+#      Ahora con los genes de 16S
+#---------------------------------------
+
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Asegurarse de tener los datos cargados
+datos_fusionados <- read.csv("~/Documents/Edgart_Flores/SIC_EFR_PROJECT/IPL_NITROGEN/Diversity/merged_data_clean_M5_M6_ORDER_phases_final.csv")
+
+# Filtrar datos de superficie y fondo
+datos_surface_ordenes <- datos_fusionados %>% filter(grepl("Surface", ID))
+datos_bottom_ordenes  <- datos_fusionados %>% filter(grepl("Bottom", ID))
+```
+
+
+```{r}
+# Identificar columnas de órdenes bacterianas (de la 13 en adelante)
+ordenes_vars_surface <- 13:ncol(datos_surface_ordenes)
+
+# Asegurar que son numéricas
+datos_surface_ordenes[, ordenes_vars_surface] <- datos_surface_ordenes[, ordenes_vars_surface] %>%
+  mutate(across(everything(), as.numeric))
+
+# Calcular suma total por orden
+suma_ordenes_surface <- colSums(datos_surface_ordenes[, ordenes_vars_surface], na.rm = TRUE)
+
+# Filtrar las órdenes con suma > 20
+ordenes_seleccionadas_surface <- names(suma_ordenes_surface[suma_ordenes_surface >0])
+ordenes_descartadas_surface <- names(suma_ordenes_surface[suma_ordenes_surface <= 0])
+
+# Conservar ID + variables ambientales (columnas 1:12) + órdenes seleccionadas
+datos_surface_filtrados_ordenes <- bind_cols(
+  datos_surface_ordenes[, 1:12],
+  datos_surface_ordenes[, ordenes_seleccionadas_surface]
+)
+
+# Imprimir resumen
+cat("Órdenes seleccionadas (Surface):", length(ordenes_seleccionadas_surface), "\n")
+cat("Órdenes descartadas (Surface):", length(ordenes_descartadas_surface), "\n")
+```
+
+
+```{r}
+# Identificar columnas de órdenes bacterianas
+ordenes_vars_bottom <- 13:ncol(datos_bottom_ordenes)
+
+# Asegurar que son numéricas
+datos_bottom_ordenes[, ordenes_vars_bottom] <- datos_bottom_ordenes[, ordenes_vars_bottom] %>%
+  mutate(across(everything(), as.numeric))
+
+# Calcular la suma total por orden
+suma_ordenes_bottom <- colSums(datos_bottom_ordenes[, ordenes_vars_bottom], na.rm = TRUE)
+
+# Filtrar las órdenes con suma > 20
+ordenes_seleccionadas_bottom <- names(suma_ordenes_bottom[suma_ordenes_bottom > 0])
+ordenes_descartadas_bottom <- names(suma_ordenes_bottom[suma_ordenes_bottom <= 0])
+
+# Conservar ID + variables ambientales (columnas 1:12) + órdenes seleccionadas
+datos_bottom_filtrados_ordenes <- bind_cols(
+  datos_bottom_ordenes[, 1:12],
+  datos_bottom_ordenes[, ordenes_seleccionadas_bottom]
+)
+
+# Imprimir resumen
+cat("Órdenes seleccionadas (Bottom):", length(ordenes_seleccionadas_bottom), "\n")
+cat("Órdenes descartadas (Bottom):", length(ordenes_descartadas_bottom), "\n") 
+```
+
+```{r}
+ordenes_surface_abundancias <- datos_surface_filtrados_ordenes
+ordenes_bottom_abundancias  <- datos_bottom_filtrados_ordenes
+```
+
+# empecemos
+```{r}
+# Cargar librerías necesarias
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+
+# Función para procesar datos de órdenes bacterianas con TODOS los filos
+process_orders_data <- function(data) {
+  # Eliminar las columnas ambientales (2 a 12)
+  data_abundancias_reducido <- data[, -c(2:12)]
+  
+  # Crear una lista de grupos de órdenes por filo basada en los datos reales
+  order_groups <- list(
+    Proteobacteria = grep("^Proteobacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Planctomycetota = grep("^Planctomycetota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Patescibacteria = grep("^Patescibacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Verrucomicrobiota = grep("^Verrucomicrobiota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Bacteroidota = grep("^Bacteroidota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Campilobacterota = grep("^Campilobacterota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Bdellovibrionota = grep("^Bdellovibrionota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Desulfobacterota = grep("^Desulfobacterota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Marinimicrobia = grep("^Marinimicrobia_", colnames(data_abundancias_reducido), value = TRUE),
+    Chloroflexi = grep("^Chloroflexi\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Cyanobacteria = grep("^Cyanobacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Actinobacteriota = grep("^Actinobacteriota\\.", colnames(data_abundancias_reducido), value = TRUE)
+  )
+  
+  # Procesar los datos
+  datos_processed <- data_abundancias_reducido %>%
+    mutate(
+      Mesocosm = case_when(
+        grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+        grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+        grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+        grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+        TRUE ~ "Other"
+      ),
+      Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+    )
+  
+  # Calcular la suma de cada grupo de órdenes
+  for (group_name in names(order_groups)) {
+    if (length(order_groups[[group_name]]) > 0) {
+      datos_processed[[group_name]] <- rowSums(datos_processed[, order_groups[[group_name]], drop = FALSE], na.rm = TRUE)
+    } else {
+      datos_processed[[group_name]] <- 0
+    }
+  }
+  
+  # Calcular el total para obtener porcentajes
+  order_columns <- names(order_groups)
+  datos_processed$Total <- rowSums(datos_processed[, order_columns], na.rm = TRUE)
+  
+  # Calcular porcentajes
+  for (group_name in order_columns) {
+    datos_processed[[group_name]] <- (datos_processed[[group_name]] / datos_processed$Total) * 100
+  }
+  
+  # Convertir a formato largo para graficar
+  datos_for_plotting <- datos_processed %>%
+    select(ID, Mesocosm, Day, all_of(order_columns)) %>%
+    pivot_longer(
+      cols = all_of(order_columns),
+      names_to = "Bacterial_Phylum",
+      values_to = "Percentage"
+    )
+  
+  return(datos_for_plotting)
+}
+
+# Procesar datos de Surface y Bottom
+orders_surface_for_plotting <- process_orders_data(ordenes_surface_abundancias)
+orders_bottom_for_plotting <- process_orders_data(ordenes_bottom_abundancias)
+
+# Crear una paleta de colores para los 12 filos
+phylum_colors <- c(
+  "Proteobacteria" = "#1f77b4",     # Azul
+  "Bacteroidota" = "#ff7f0e",       # Naranja
+  "Verrucomicrobiota" = "#2ca02c",  # Verde
+  "Cyanobacteria" = "#d62728",      # Rojo
+  "Actinobacteriota" = "#9467bd",   # Púrpura
+  "Planctomycetota" = "#8c564b",    # Marrón
+  "Patescibacteria" = "#e377c2",    # Rosa
+  "Campilobacterota" = "#7f7f7f",   # Gris
+  "Bdellovibrionota" = "#bcbd22",   # Amarillo verdoso
+  "Desulfobacterota" = "#17becf",   # Cian
+  "Marinimicrobia" = "#aec7e8",     # Azul claro
+  "Chloroflexi" = "#ffbb78"         # Naranja claro
+)
+
+# Función para crear gráficos para cada mesocosm
+plot_mesocosm_orders <- function(mesocosm_number, data, sample_type = "Surface") {
+  filtered_data <- data %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, 
+                     label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  days <- sort(unique(filtered_data$Day))
+  
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Bacterial_Phylum)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +
+    scale_fill_manual(values = phylum_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),
+      labels = function(x) ifelse(x %% 10 == 0, x, ""),
+      limits = c(min(days) - 2, max(days) + 2)
+    ) +
+    labs(
+      title = paste("Bacterial Phylum Composition in Mesocosm", mesocosm_number, paste0("(", sample_type, ")")),
+      x = "",
+      y = "Percentage (%)",
+      fill = "Bacterial Phylum"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank()
+    )
+}
+
+# Crear gráficos para Surface
+plot_surface_meso5_orders <- plot_mesocosm_orders(5, orders_surface_for_plotting, "Surface")
+plot_surface_meso6_orders <- plot_mesocosm_orders(6, orders_surface_for_plotting, "Surface")
+plot_surface_meso7_orders <- plot_mesocosm_orders(7, orders_surface_for_plotting, "Surface")
+plot_surface_meso8_orders <- plot_mesocosm_orders(8, orders_surface_for_plotting, "Surface")
+
+# Crear gráficos para Bottom
+plot_bottom_meso5_orders <- plot_mesocosm_orders(5, orders_bottom_for_plotting, "Bottom")
+plot_bottom_meso6_orders <- plot_mesocosm_orders(6, orders_bottom_for_plotting, "Bottom")
+plot_bottom_meso7_orders <- plot_mesocosm_orders(7, orders_bottom_for_plotting, "Bottom")
+plot_bottom_meso8_orders <- plot_mesocosm_orders(8, orders_bottom_for_plotting, "Bottom")
+
+# Combinar todos los gráficos - Surface arriba, Bottom abajo
+# Orden: Mesocosm 6, 7, 5, 8
+combined_all_orders_plot <- grid.arrange(
+  # Surface
+  plot_surface_meso6_orders, plot_surface_meso7_orders, plot_surface_meso5_orders, plot_surface_meso8_orders,
+  # Bottom
+  plot_bottom_meso6_orders, plot_bottom_meso7_orders, plot_bottom_meso5_orders, plot_bottom_meso8_orders,
+  ncol = 4, nrow = 2,
+  top = "Bacterial Phylum Composition in All Samples"
+)
+print(combined_all_orders_plot)
+
+# Guardar el gráfico
+#ggsave("bacterial_orders_surface_bottom_combined.png", 
+#       plot = combined_all_orders_plot, 
+#       width = 20, 
+#       height = 12, 
+#       dpi = 300)
+```
+
+
+```{r}
+# Cargar librerías necesarias
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+
+# Procesar datos de Surface y Bottom
+orders_surface_for_plotting <- process_orders_data(ordenes_surface_abundancias)
+orders_bottom_for_plotting <- process_orders_data(ordenes_bottom_abundancias)
+
+# Crear una paleta de colores para los 12 filos
+phylum_colors <- c(
+  "Proteobacteria" = "#1f77b4",     # Azul
+  "Bacteroidota" = "#ff7f0e",       # Naranja
+  "Verrucomicrobiota" = "#2ca02c",  # Verde
+  "Cyanobacteria" = "#d62728",      # Rojo
+  "Actinobacteriota" = "#9467bd",   # Púrpura
+  "Planctomycetota" = "#8c564b",    # Marrón
+  "Patescibacteria" = "#e377c2",    # Rosa
+  "Campilobacterota" = "#7f7f7f",   # Gris
+  "Bdellovibrionota" = "#bcbd22",   # Amarillo verdoso
+  "Desulfobacterota" = "#17becf",   # Cian
+  "Marinimicrobia" = "#aec7e8",     # Azul claro
+  "Chloroflexi" = "#ffbb78"         # Naranja claro
+)
+
+# Función para crear gráficos para cada mesocosm (con marco)
+plot_mesocosm_orders <- function(mesocosm_number, data, sample_type = "Surface") {
+  filtered_data <- data %>%
+    filter(Mesocosm == paste("Mesocosm", mesocosm_number))
+  
+  if(nrow(filtered_data) == 0) {
+    return(ggplot() + 
+             annotate("text", x = 0.5, y = 0.5, 
+                     label = paste("No data for Mesocosm", mesocosm_number)) + 
+             theme_void())
+  }
+  
+  days <- sort(unique(filtered_data$Day))
+  
+  ggplot(filtered_data, aes(x = Day, y = Percentage, fill = Bacterial_Phylum)) +
+    geom_bar(stat = "identity", position = "stack", width = 1.5) +
+    scale_fill_manual(values = phylum_colors) +
+    scale_x_continuous(
+      breaks = seq(0, max(days) + 10, by = 10),
+      labels = function(x) ifelse(x %% 10 == 0, x, ""),
+      limits = c(min(days) - 2, max(days) + 2)
+    ) +
+    labs(
+      title = paste("Bacterial Phylum Composition in Mesocosm", mesocosm_number, paste0("(", sample_type, ")")),
+      x = "",
+      y = "Percentage (%)",
+      fill = "Bacterial Phylum"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      legend.position = "right",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      # Agregar el marco/borde
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+      # Asegurar que los ejes también tienen color
+      axis.line = element_line(colour = "black", linewidth = 0.5)
+    )
+}
+
+# IMPORTANTE: Solo crear gráficos para Mesocosmos 5 y 6 (que son los que existen)
+# Crear gráficos para Surface
+plot_surface_meso5_orders <- plot_mesocosm_orders(5, orders_surface_for_plotting, "Surface")
+plot_surface_meso6_orders <- plot_mesocosm_orders(6, orders_surface_for_plotting, "Surface")
+
+# Crear gráficos para Bottom
+plot_bottom_meso5_orders <- plot_mesocosm_orders(5, orders_bottom_for_plotting, "Bottom")
+plot_bottom_meso6_orders <- plot_mesocosm_orders(6, orders_bottom_for_plotting, "Bottom")
+
+# Combinar los gráficos - Solo 2 mesocosmos
+combined_orders_plot <- grid.arrange(
+  # Surface
+  plot_surface_meso5_orders, plot_surface_meso6_orders,
+  # Bottom  
+  plot_bottom_meso5_orders, plot_bottom_meso6_orders,
+  ncol = 2, nrow = 2,
+  top = "Bacterial Phylum Composition in Surface and Bottom Samples"
+)
+print(combined_orders_plot)
+
+# Guardar el gráfico
+#ggsave("bacterial_orders_surface_bottom_combined.png", 
+#       plot = combined_orders_plot, 
+#       width = 14, 
+#       height = 12, 
+#       dpi = 300)
+```
+# Ahora vamos a sacar el promedio
+
+```{r}
+# ============================================================
+# Promedio por Día (across mesocosms) -> relativización 0-100%
+# ============================================================
+
+# --- Surface ---
+phylum_surface_average <- orders_surface_for_plotting %>%
+  group_by(Day, Bacterial_Phylum) %>%
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Day) %>%
+  mutate(Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+         Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100) %>%
+  ungroup()
+
+# --- Bottom (subsurface) ---
+phylum_bottom_average <- orders_bottom_for_plotting %>%
+  group_by(Day, Bacterial_Phylum) %>%
+  summarise(Avg_Percentage = mean(Percentage, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Day) %>%
+  mutate(Day_Total = sum(Avg_Percentage, na.rm = TRUE),
+         Adjusted_Percentage = (Avg_Percentage / Day_Total) * 100) %>%
+  ungroup()
+
+# Orden fijo del factor para que la leyenda/paleta sea consistente
+phylum_order <- names(phylum_colors)
+phylum_surface_average$Bacterial_Phylum <- factor(phylum_surface_average$Bacterial_Phylum, levels = phylum_order)
+phylum_bottom_average$Bacterial_Phylum  <- factor(phylum_bottom_average$Bacterial_Phylum, levels = phylum_order)
+```
+
+```{r}
+library(patchwork)
+# ============================================================
+# Gráfico: Composición de Filos Bacterianos (Surface y Bottom)
+# Estructura tipo Figura 3 (promedio, relativizado 0-100%, fases)
+# ============================================================
+
+phase_breaks <- c(11, 19, 37)
+days_phylum_surface <- sort(unique(phylum_surface_average$Day))
+days_phylum_bottom  <- sort(unique(phylum_bottom_average$Day))
+
+surface_phylum_plot <- ggplot(phylum_surface_average,
+       aes(x = Day, y = Adjusted_Percentage, fill = Bacterial_Phylum)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = phylum_colors, name = "Bacterial Phylum") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_phylum_surface) + 10, by = 10),
+    limits = c(min(days_phylum_surface) - 2, max(days_phylum_surface) + 2)
+  ) +
+  scale_y_continuous(name = "Relative Abundance (%)") +
+  labs(x = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+bottom_phylum_plot <- ggplot(phylum_bottom_average,
+       aes(x = Day, y = Adjusted_Percentage, fill = Bacterial_Phylum)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = phylum_colors, name = "Bacterial Phylum") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_phylum_bottom) + 10, by = 10),
+    limits = c(min(days_phylum_bottom) - 2, max(days_phylum_bottom) + 2)
+  ) +
+  scale_y_continuous(name = "Relative Abundance (%)") +
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+# --- Franja de fases + ensamblaje con patchwork ---
+phase_positions <- c(mean(c(0, 11)), mean(c(11, 19)), mean(c(19, 37)),
+                      mean(c(37, max(days_phylum_bottom) + 2)))
+
+phase_labels_plot_phylum <- ggplot() +
+  annotate("text", x = phase_positions, y = 0,
+           label = c("Phase I", "Phase II", "Phase III", "Phase IV"),
+           size = 4, fontface = "bold") +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_x_continuous(limits = c(min(days_phylum_bottom) - 2, max(days_phylum_bottom) + 2)) +
+  theme_void()
+
+final_phylum_plot <- phase_labels_plot_phylum / surface_phylum_plot / bottom_phylum_plot +
+  plot_layout(heights = c(0.5, 10, 10), guides = "collect") &
+  theme(legend.position = "right")
+
+final_phylum_plot <- final_phylum_plot +
+  plot_annotation(tag_levels = list(c("", "A", "B"))) &
+  theme(plot.tag = element_text(size = 14, face = "bold"))
+
+print(final_phylum_plot)
+```
+```{r}
+# ============================================================
+# 0. LIBRERÍAS
+# ============================================================
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+# ============================================================
+# 1. PALETA DE COLORES (inspirada en Fig. 1 - tonos tierra/cálidos
+#    para dominantes, fríos/pastel para menos abundantes)
+# ============================================================
+phylum_colors <- c(
+  "Proteobacteria"     = "#8B5A2B",  # marrón cálido
+  "Bacteroidota"       = "#E8B84B",  # amarillo mostaza
+  "Verrucomicrobiota"  = "#C9A0DC",  # lila suave
+  "Cyanobacteria"      = "#4C9A2A",  # verde
+  "Actinobacteriota"   = "#D9895B",  # naranja tierra
+  "Planctomycetota"    = "#7B6D8D",  # gris-violeta apagado
+  "Patescibacteria"    = "#D9536A",  # rosado/coral
+  "Campilobacterota"   = "#B5D96C",  # verde lima claro
+  "Bdellovibrionota"   = "#5B7C99",  # azul grisáceo
+  "Desulfobacterota"   = "#2E6F40",  # verde oscuro
+  "Marinimicrobia"     = "#E3A857",  # naranja arena
+  "Chloroflexi"        = "#A6CEE3"   # celeste claro
+)
+
+# ============================================================
+# 2. GRUPOS DE FILOS (mismos patrones grep usados antes)
+# ============================================================
+build_order_groups <- function(data_abundancias_reducido) {
+  list(
+    Proteobacteria     = grep("^Proteobacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Planctomycetota    = grep("^Planctomycetota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Patescibacteria    = grep("^Patescibacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Verrucomicrobiota  = grep("^Verrucomicrobiota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Bacteroidota       = grep("^Bacteroidota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Campilobacterota   = grep("^Campilobacterota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Bdellovibrionota   = grep("^Bdellovibrionota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Desulfobacterota   = grep("^Desulfobacterota\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Marinimicrobia     = grep("^Marinimicrobia_", colnames(data_abundancias_reducido), value = TRUE),
+    Chloroflexi        = grep("^Chloroflexi\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Cyanobacteria      = grep("^Cyanobacteria\\.", colnames(data_abundancias_reducido), value = TRUE),
+    Actinobacteriota   = grep("^Actinobacteriota\\.", colnames(data_abundancias_reducido), value = TRUE)
+  )
+}
+
+# ============================================================
+# 3. FUNCIÓN: sumar abundancias CRUDAS por filo (sin % todavía)
+# ============================================================
+compute_raw_phylum_sums <- function(data) {
+  data_abundancias_reducido <- data[, -c(2:12)]   # quitar variables ambientales
+  order_groups <- build_order_groups(data_abundancias_reducido)
+
+  datos_processed <- data_abundancias_reducido %>%
+    mutate(
+      Mesocosm = case_when(
+        grepl("Mesocosm 5", ID) ~ "Mesocosm 5",
+        grepl("Mesocosm 6", ID) ~ "Mesocosm 6",
+        grepl("Mesocosm 7", ID) ~ "Mesocosm 7",
+        grepl("Mesocosm 8", ID) ~ "Mesocosm 8",
+        TRUE ~ "Other"
+      ),
+      Day = as.numeric(gsub(".*Day_([0-9]+).*", "\\1", ID))
+    )
+
+  for (group_name in names(order_groups)) {
+    if (length(order_groups[[group_name]]) > 0) {
+      datos_processed[[group_name]] <- rowSums(datos_processed[, order_groups[[group_name]], drop = FALSE], na.rm = TRUE)
+    } else {
+      datos_processed[[group_name]] <- 0
+    }
+  }
+
+  order_columns <- names(order_groups)
+  datos_processed %>%
+    select(ID, Mesocosm, Day, all_of(order_columns))
+}
+
+# ============================================================
+# 4. APLICAR A SURFACE Y BOTTOM -> abundancias crudas por muestra
+# ============================================================
+raw_surface <- compute_raw_phylum_sums(ordenes_surface_abundancias)
+raw_bottom  <- compute_raw_phylum_sums(ordenes_bottom_abundancias)
+
+phylum_columns <- names(build_order_groups(ordenes_surface_abundancias[, -c(2:12)]))
+
+# ============================================================
+# 5. OPCIÓN B — PASO 1: promedio de valores CRUDOS entre mesocosms
+#              PASO 2: relativizar ese promedio a 0-100%
+# ============================================================
+average_and_relativize <- function(raw_data, phylum_columns) {
+  raw_data %>%
+    pivot_longer(cols = all_of(phylum_columns),
+                 names_to = "Bacterial_Phylum", values_to = "Raw_Abundance") %>%
+    group_by(Day, Bacterial_Phylum) %>%
+    summarise(Avg_Raw_Abundance = mean(Raw_Abundance, na.rm = TRUE), .groups = "drop") %>%
+    group_by(Day) %>%
+    mutate(Day_Total = sum(Avg_Raw_Abundance, na.rm = TRUE),
+           Adjusted_Percentage = (Avg_Raw_Abundance / Day_Total) * 100) %>%
+    ungroup()
+}
+
+phylum_surface_average <- average_and_relativize(raw_surface, phylum_columns)
+phylum_bottom_average  <- average_and_relativize(raw_bottom, phylum_columns)
+
+# Orden fijo del factor (consistente con la paleta)
+phylum_order <- names(phylum_colors)
+phylum_surface_average$Bacterial_Phylum <- factor(phylum_surface_average$Bacterial_Phylum, levels = phylum_order)
+phylum_bottom_average$Bacterial_Phylum  <- factor(phylum_bottom_average$Bacterial_Phylum, levels = phylum_order)
+
+# ============================================================
+# 6. GRÁFICO — misma estructura que la Figura 3 (sin línea, solo barras)
+# ============================================================
+phase_breaks <- c(11, 19, 37)
+days_phylum_surface <- sort(unique(phylum_surface_average$Day))
+days_phylum_bottom  <- sort(unique(phylum_bottom_average$Day))
+
+surface_phylum_plot <- ggplot(phylum_surface_average,
+       aes(x = Day, y = Adjusted_Percentage, fill = Bacterial_Phylum)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = phylum_colors, name = "Bacterial Phylum") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_phylum_surface) + 10, by = 10),
+    limits = c(min(days_phylum_surface) - 2, max(days_phylum_surface) + 2)
+  ) +
+  scale_y_continuous(name = "Relative Abundance (%)") +
+  labs(x = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+bottom_phylum_plot <- ggplot(phylum_bottom_average,
+       aes(x = Day, y = Adjusted_Percentage, fill = Bacterial_Phylum)) +
+  geom_bar(stat = "identity", position = "stack", width = 1.5) +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_fill_manual(values = phylum_colors, name = "Bacterial Phylum") +
+  scale_x_continuous(
+    breaks = seq(0, max(days_phylum_bottom) + 10, by = 10),
+    limits = c(min(days_phylum_bottom) - 2, max(days_phylum_bottom) + 2)
+  ) +
+  scale_y_continuous(name = "Relative Abundance (%)") +
+  labs(x = "Day") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+  )
+
+# ============================================================
+# 7. FRANJA DE FASES + ENSAMBLAJE FINAL
+# ============================================================
+phase_positions <- c(mean(c(0, 11)), mean(c(11, 19)), mean(c(19, 37)),
+                      mean(c(37, max(days_phylum_bottom) + 2)))
+
+phase_labels_plot_phylum <- ggplot() +
+  annotate("text", x = phase_positions, y = 0,
+           label = c("Phase I", "Phase II", "Phase III", "Phase IV"),
+           size = 4, fontface = "bold") +
+  geom_vline(xintercept = phase_breaks, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_x_continuous(limits = c(min(days_phylum_bottom) - 2, max(days_phylum_bottom) + 2)) +
+  theme_void()
+
+final_phylum_plot <- phase_labels_plot_phylum / surface_phylum_plot / bottom_phylum_plot +
+  plot_layout(heights = c(0.5, 10, 10), guides = "collect") &
+  theme(legend.position = "right")
+
+final_phylum_plot <- final_phylum_plot +
+  plot_annotation(tag_levels = list(c("", "A", "B"))) &
+  theme(plot.tag = element_text(size = 14, face = "bold"))
+
+print(final_phylum_plot)
+
+# --- ggsave() se agrega solo cuando confirmes que esta es la versión final ---
+```
+
+# coombinar ambos
+```{r}
+# ============================================================
+# ENSAMBLAJE FINAL COMBINADO: Lípidos + Filos Bacterianos
+# (requiere haber corrido ambos scripts individuales antes,
+#  para tener disponibles los 4 paneles base)
+# ============================================================
+library(patchwork)
+
+# --- Rango de días combinado (eje X compartido entre los 4 paneles) ---
+all_days_combined <- c(days_surface, days_bottom, days_phylum_surface, days_phylum_bottom)
+day_min_combined <- min(all_days_combined) - 2
+day_max_combined <- max(all_days_combined) + 2
+
+phase_breaks_combined <- c(11, 19, 37)
+
+# --- Reconstruir los 4 paneles con el mismo eje X, y quitar ejes intermedios ---
+surface_plot_final <- surface_plot_combined +
+  scale_x_continuous(breaks = seq(0, day_max_combined, by = 10),
+                      limits = c(day_min_combined, day_max_combined)) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  labs(x = NULL)
+
+bottom_plot_final <- bottom_plot_combined +
+  scale_x_continuous(breaks = seq(0, day_max_combined, by = 10),
+                      limits = c(day_min_combined, day_max_combined)) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  labs(x = NULL)
+
+surface_phylum_final <- surface_phylum_plot +
+  scale_x_continuous(breaks = seq(0, day_max_combined, by = 10),
+                      limits = c(day_min_combined, day_max_combined)) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  labs(x = NULL)
+
+bottom_phylum_final <- bottom_phylum_plot +
+  scale_x_continuous(breaks = seq(0, day_max_combined, by = 10),
+                      limits = c(day_min_combined, day_max_combined)) +
+  labs(x = "Day")   # único panel con eje X visible, al final de la columna
+
+# --- Franja de fases única y compartida ---
+phase_positions_combined <- c(mean(c(0, 11)), mean(c(11, 19)), mean(c(19, 37)),
+                               mean(c(37, day_max_combined)))
+
+phase_labels_plot_combined <- ggplot() +
+  annotate("text", x = phase_positions_combined, y = 0,
+           label = c("Phase I", "Phase II", "Phase III", "Phase IV"),
+           size = 4, fontface = "bold") +
+  geom_vline(xintercept = phase_breaks_combined, linetype = "dashed", color = "grey40", linewidth = 0.5) +
+  scale_x_continuous(limits = c(day_min_combined, day_max_combined)) +
+  theme_void()
+
+# --- Ensamblaje final ---
+final_combined_plot <- phase_labels_plot_combined /
+  surface_plot_final /
+  bottom_plot_final /
+  surface_phylum_final /
+  bottom_phylum_final +
+  plot_layout(heights = c(0.5, 10, 10, 10, 10), guides = "collect") &
+  theme(legend.position = "right")
+
+final_combined_plot <- final_combined_plot +
+  plot_annotation(tag_levels = list(c("", "A", "B", "C", "D"))) &
+  theme(plot.tag = element_text(size = 14, face = "bold"))
+
+print(final_combined_plot)
+
+# --- ggsave() se agrega solo cuando confirmes que esta es la versión final ---
+# ggsave("combined_lipids_bacteria_figure.png", plot = final_combined_plot,
+#        width = 10, height = 22, dpi = 300)
+```
+
+
+
+
+
+
+
+

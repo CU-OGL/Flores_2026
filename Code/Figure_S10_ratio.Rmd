@@ -1,0 +1,229 @@
+---
+title: "Untitled"
+author: "Edgart Flores"
+date: "6/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(reshape2)
+library(tidyverse)
+library(gapminder)
+library(here) 
+library(broom)
+library(RColorBrewer)
+library(dplyr)
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+
+library(corrplot)
+library(gridExtra)
+
+```
+
+
+# codigo de paper IPLs Flores 2022 et al., 
+
+```{r setup, include=FALSE}
+library(ggplot2)
+ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/20.sat_unsat_table.csv")
+#ratio1 <- read.csv("~/Documents/EF_IPL_Processing_new/data_final/21.sat_unsat_table.csv")
+ratio$environment = factor(ratio$environment, levels=c('Water_column','Bathyal_sediments','Hadal_sediments'))
+data <- data.frame(ratio)
+#str(data)
+```
+
+
+```{r pressure, echo=FALSE}
+ggplot(data = ratio, aes(x=factor(environment), y=unsat.sat, fill=environment)) + 
+   geom_boxplot(position=position_dodge(0.9), outlier.colour = NA)  + 
+  geom_smooth(method="gam", span=0.20, se=TRUE, aes(group=unsat.sat, color=unsat.sat)) +
+  scale_fill_manual(values = c( "#999999","peru", "steelblue")) +
+  
+  ylab("Total Unsaturated/Total saturated ")
+  xlab("Environment") 
+```
+
+```{r pressure, echo=FALSE}
+p <- ggplot(ratio,aes(x=environment,y=unsat.sat, fill=environment)) +
+  geom_boxplot(aes(group=environment)) + 
+  geom_point(aes(fill=environment),size=2,shape=21,position=position_jitterdodge(0.6)) +
+  #geom_smooth(aes(fill=environment), method = "gam") +
+    stat_summary(fun.y=mean, geom="point", shape=19, size=2, color="red", fill="black") +
+  scale_fill_manual(values = c( "#999999","#74c476", "#E69F00"))  
+p
+```
+
+#-----------------------------------------------------------------------------------------------------------------
+#                   NUEVO PROYECTO, QUIERO VER COMO CAMBIA ESTE RATIO EN LOS MESOCOSMS PAPER Flores et al., 2025
+#----------------------------------------------------------------------------------------------------------------
+
+
+# SURFACE 
+
+```{r}
+library(ggplot2)
+
+ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/05.surface_class_sampletype_bound_sat_unsat_ratio.csv")
+
+#ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/06.subsurface_class_sampletype_bound_sat_unsat_ratio.csv")
+
+ratio$environment = factor(ratio$phase, levels=c('Phase1','Phase2','Phase3','Phase4'))
+data <- data.frame(ratio)
+#str(data)
+```
+
+# SURFACE
+
+```{r pressure, echo=FALSE}
+p <- ggplot(ratio,aes(x=phase,y=unsat.sat, fill=phase)) +
+  geom_boxplot(aes(group=phase)) + 
+  geom_point(aes(fill=phase),size=2,shape=21,position=position_jitterdodge(0.6)) +
+  #geom_smooth(aes(fill=environment), method = "gam") +
+    stat_summary(fun.y=mean, geom="point", shape=19, size=2, color="red", fill="black") +
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC"))  
+p
+```
+
+
+```{r}
+p <- ggplot(ratio, aes(x = phase, y = unsat.sat, fill = phase)) +
+  geom_boxplot(aes(group = phase)) + 
+  geom_point(aes(fill = phase), size = 2, shape = 21, position = position_jitterdodge(0.6)) +
+  stat_summary(fun = mean, geom = "point", shape = 19, size = 2, color = "red", fill = "black") +
+  geom_smooth(aes(group = 1), method = "loess", color = "gray", se = FALSE) +  # Línea suavizada
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC"))
+
+p
+```
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+
+p <- ggplot(ratio, aes(x = phase, y = unsat.sat, fill = phase)) +
+  geom_boxplot(aes(group = phase)) + 
+  geom_point(aes(fill = phase), size = 2, shape = 21, position = position_jitterdodge(0.6)) +
+  stat_summary(fun = mean, geom = "point", shape = 19, size = 2, color = "red", fill = "black") +
+  geom_smooth(aes(group = 1), method = "loess", color = "blue", se = FALSE) +
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC")) +
+  theme_minimal() +  # Cambia el tema a fondo blanco
+  theme(
+    panel.grid = element_blank(),        # Elimina las cuadrículas
+    panel.background = element_rect(fill = "white", color = NA), # Fondo blanco
+    plot.background = element_rect(fill = "white", color = NA),  # Fondo blanco alrededor del gráfico
+    panel.border = element_rect(color = "black", fill = NA, size = 1)  # Borde negro alrededor del gráfico
+  )
+
+p
+```
+
+# Ahora Wilcoxon test (p value < 0.001)
+# Ahora vamos agregar la significancia 
+
+```{r}
+ratio$phase <- as.factor(ratio$phase)
+```
+
+```{r}
+p <- ggplot(ratio, aes(x = phase, y = unsat.sat, fill = phase)) +
+  geom_boxplot(aes(group = phase)) + 
+  geom_point(aes(fill = phase), size = 2, shape = 21, position = position_jitterdodge(0.6)) +
+  geom_smooth(aes(group = 1), method = "loess", color = "black", se = FALSE) +  # Asegura el grupo para smooth
+  stat_summary(fun.y = mean, geom = "point", shape = 19, size = 2, color = "red", fill = "black") +
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC")) +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA))
+```
+
+```{r}
+library(ggpubr)
+
+p <- p + stat_compare_means(
+  comparisons = list(c("Phase1", "Phase2"), c("Phase1", "Phase3"), c("Phase1", "Phase4"),
+                     c("Phase2", "Phase3"), c("Phase2", "Phase4"), c("Phase3", "Phase4")),
+  method = "wilcox.test",
+  label = "p.signif"
+)
+
+
+p
+```
+
+
+
+
+# BOTTOM 
+
+```{r }
+library(ggplot2)
+
+# ratio <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/05.surface_class_sampletype_bound_sat_unsat_ratio.csv")
+
+ratio1 <- read.csv("~/Documents/SIC_EFR_PROJECT/IPL_NITROGEN/boxplot/06.subsurface_class_sampletype_bound_sat_unsat_ratio.csv")
+
+ratio1$environment = factor(ratio1$phase, levels=c('Phase1','Phase2','Phase3','Phase4'))
+data <- data.frame(ratio)
+#str(data)
+```
+
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+
+q <- ggplot(ratio1, aes(x = phase, y = unsat.sat, fill = phase)) +
+  geom_boxplot(aes(group = phase)) + 
+  geom_point(aes(fill = phase), size = 2, shape = 21, position = position_jitterdodge(0.6)) +
+  stat_summary(fun = mean, geom = "point", shape = 19, size = 2, color = "red", fill = "black") +
+  geom_smooth(aes(group = 1), method = "loess", color = "blue", se = FALSE) +
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC")) +
+  theme_minimal() +  # Cambia el tema a fondo blanco
+  theme(
+    panel.grid = element_blank(),        # Elimina las cuadrículas
+    panel.background = element_rect(fill = "white", color = NA), # Fondo blanco
+    plot.background = element_rect(fill = "white", color = NA),  # Fondo blanco alrededor del gráfico
+    panel.border = element_rect(color = "black", fill = NA, size = 1)  # Borde negro alrededor del gráfico
+  )
+
+q
+```
+
+# Ahora Wilcoxon test (p value < 0.001)
+# Ahora vamos agregar la significancia 
+
+```{r}
+ratio1$phase <- as.factor(ratio1$phase)
+```
+
+```{r}
+q <- ggplot(ratio1, aes(x = phase, y = unsat.sat, fill = phase)) +
+  geom_boxplot(aes(group = phase)) + 
+  geom_point(aes(fill = phase), size = 2, shape = 21, position = position_jitterdodge(0.6)) +
+  geom_smooth(aes(group = 1), method = "loess", color = "black", se = FALSE) +  # Asegura el grupo para smooth
+  stat_summary(fun.y = mean, geom = "point", shape = 19, size = 2, color = "red", fill = "black") +
+  scale_fill_manual(values = c("#B2182B", "#EF8A62", "#67A9CF", "#2166AC")) +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA))
+```
+
+
+```{r}
+library(ggpubr)
+
+q <- q + stat_compare_means(
+  comparisons = list(c("Phase1", "Phase2"), c("Phase1", "Phase3"), c("Phase1", "Phase4"),
+                     c("Phase2", "Phase3"), c("Phase2", "Phase4"), c("Phase3", "Phase4")),
+  method = "wilcox.test",
+  label = "p.signif"
+)
+
+q
+```
+```{r}
+grid.arrange(p, q, ncol = 1)
+```
+
+

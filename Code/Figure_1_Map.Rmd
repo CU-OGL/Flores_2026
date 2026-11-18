@@ -1,0 +1,33 @@
+---
+title: "Figure_1_mapa"
+output: html_document
+date: "2026-11-17"
+--- 
+
+
+```{r mapa_peru, echo=FALSE, fig.width=5, fig.height=9}
+library(ggOceanMaps)
+library(ggplot2)
+
+basemap(limits = c(-85, -70, -30, 0),   # lon min, lon max, lat min, lat max
+        bathymetry = TRUE,
+        bathy.style = "rbb",            # raster por intervalos en azules
+        land.col = "grey35",            # tierra gris oscuro
+        land.border.col = NA,           # sin contorno de costa
+        grid.col = NA,                  # sin líneas de grilla
+        lon.interval = 5, lat.interval = 5) +
+  # Recuadro en Callao (~12.05 °S, 77.15 °W)
+  annotate("rect", xmin = -77.6, xmax = -76.7, ymin = -12.5, ymax = -11.6,
+           fill = NA, colour = "black", linewidth = 0.6) +
+  annotate("text", x = -76.3, y = -12.05, label = "Callao, Peru",
+           hjust = 0, colour = "white", size = 5) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.82, 0.80),
+        legend.background = element_blank(),
+        legend.key = element_blank(),
+        legend.title = element_text(colour = "white"),
+        legend.text  = element_text(colour = "white"))
+```
+
+
